@@ -138,11 +138,12 @@ enum class SensorHealth
 /**
  * @brief Sensor type enumeration
  */
-enum class SensorType {
-  WHEEL_IMU,
-  LIDAR,
-  VISUAL,
-  MARKER
+enum class SensorType
+{
+    WHEEL_IMU,
+    LIDAR,
+    VISUAL,
+    MARKER
 };
 
 /**
