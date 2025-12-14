@@ -64,6 +64,9 @@ set(COMMON_DEPENDENCIES
 add_executable(lidar_odom_node
   src/nodes/lidar_odom_node.cpp
   src/lidar_odom/lidar_odometry.cpp
+  src/lidar_odom/feature_extractor.cpp
+  src/lidar_odom/feature_registration.cpp
+  src/lidar_odom/local_map.cpp
 )
 ament_target_dependencies(lidar_odom_node ${COMMON_DEPENDENCIES})
 target_link_libraries(lidar_odom_node ${PCL_LIBRARIES})

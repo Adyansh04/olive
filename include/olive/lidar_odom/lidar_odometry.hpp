@@ -1,11 +1,15 @@
 /**
  * @file lidar_odometry.hpp
- * @brief Lidar odometry using ICP/GICP/NDT
+ * @brief LiDAR odometry with feature-based registration
  *
  * Implements LiDAR-based odometry with:
- * - PL-ICP (Point-to-Line ICP) for 2D LiDAR
- * - GICP (Generalized ICP) for 3D LiDAR
+ * - LOAM-style feature extraction (edge + planar features)
+ * - Feature-based registration (point-to-edge + point-to-plane)
+ * - Local map accumulation for scan-to-map matching
+ * - GICP fallback for featureless environments
  * - Keyframe selection heuristic for efficiency
+ *
+ * Reference: LOAM, LeGO-LOAM, LIO-SAM
  */
 
 #ifndef OLIVE_LIDAR_LIDAR_ODOMETRY_HPP_
@@ -28,7 +32,12 @@
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 
+#include <memory>
+
 #include "olive/common/types.hpp"
+#include "olive/lidar_odom/feature_extractor.hpp"
+#include "olive/lidar_odom/feature_registration.hpp"
+#include "olive/lidar_odom/local_map.hpp"
 
 namespace olive
 {
@@ -57,6 +66,17 @@ struct LidarConfig
     int    min_points_threshold;     ///< Minimum points for valid registration
     double degeneracy_threshold;     ///< Eigenvalue ratio for degeneracy detection
 
+    // Feature-based registration settings
+    bool   use_feature_registration; ///< Enable LOAM-style feature registration
+    double edge_curvature_threshold; ///< Curvature threshold for edge features
+    double planar_curvature_threshold; ///< Curvature threshold for planar features
+    int    max_edge_features;        ///< Max edge features per scan
+    int    max_planar_features;      ///< Max planar features per scan
+
+    // Local map settings
+    int    local_map_size;           ///< Number of keyframes in local map
+    double local_map_voxel_size;     ///< Voxel size for local map downsampling
+
     LidarConfig()
       : is_3d(true)
       , keyframe_distance(0.15)       // Reduced from 0.5 for faster updates
@@ -75,6 +95,14 @@ struct LidarConfig
       , velocity_filter_alpha(0.3)    // smoothing factor
       , min_points_threshold(100)     // minimum valid points
       , degeneracy_threshold(100.0)   // eigenvalue ratio threshold
+      // Feature-based defaults
+      , use_feature_registration(true)
+      , edge_curvature_threshold(0.1)
+      , planar_curvature_threshold(0.01)
+      , max_edge_features(400)
+      , max_planar_features(800)
+      , local_map_size(10)
+      , local_map_voxel_size(0.2)
     {}
 };
 
@@ -191,6 +219,16 @@ private:
     // PCL components
     pcl::GeneralizedIterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> gicp_;
     pcl::VoxelGrid<pcl::PointXYZ>                                       voxel_filter_;
+
+    // Feature-based components (NEW)
+    std::unique_ptr<FeatureExtractor>    feature_extractor_;
+    std::unique_ptr<FeatureRegistration> feature_registration_;
+    std::unique_ptr<LocalMap>            local_map_;
+
+    // Feature-based methods
+    RegistrationResult performFeatureRegistration(
+        const ExtractedFeatures& current_features,
+        const Eigen::Matrix4f& initial_guess);
 
     // ROS Interfaces
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr           cloud_sub_;

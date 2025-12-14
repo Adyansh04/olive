@@ -60,6 +60,15 @@ LidarOdometry::on_configure(const rclcpp_lifecycle::State& /*previous_state*/)
     declare_parameter("min_points_threshold", config_.min_points_threshold);
     declare_parameter("degeneracy_threshold", config_.degeneracy_threshold);
 
+    // Feature-based registration parameters (NEW)
+    declare_parameter("use_feature_registration", config_.use_feature_registration);
+    declare_parameter("edge_curvature_threshold", config_.edge_curvature_threshold);
+    declare_parameter("planar_curvature_threshold", config_.planar_curvature_threshold);
+    declare_parameter("max_edge_features", config_.max_edge_features);
+    declare_parameter("max_planar_features", config_.max_planar_features);
+    declare_parameter("local_map_size", config_.local_map_size);
+    declare_parameter("local_map_voxel_size", config_.local_map_voxel_size);
+
     get_parameter("is_3d", config_.is_3d);
     get_parameter("keyframe_distance", config_.keyframe_distance);
     get_parameter("keyframe_rotation", config_.keyframe_rotation);
@@ -79,6 +88,15 @@ LidarOdometry::on_configure(const rclcpp_lifecycle::State& /*previous_state*/)
     get_parameter("velocity_filter_alpha", config_.velocity_filter_alpha);
     get_parameter("min_points_threshold", config_.min_points_threshold);
     get_parameter("degeneracy_threshold", config_.degeneracy_threshold);
+
+    // Get feature-based registration parameters (NEW)
+    get_parameter("use_feature_registration", config_.use_feature_registration);
+    get_parameter("edge_curvature_threshold", config_.edge_curvature_threshold);
+    get_parameter("planar_curvature_threshold", config_.planar_curvature_threshold);
+    get_parameter("max_edge_features", config_.max_edge_features);
+    get_parameter("max_planar_features", config_.max_planar_features);
+    get_parameter("local_map_size", config_.local_map_size);
+    get_parameter("local_map_voxel_size", config_.local_map_voxel_size);
 
     // Log all parameters with names and formatting
     RCLCPP_INFO(
@@ -121,15 +139,70 @@ LidarOdometry::on_configure(const rclcpp_lifecycle::State& /*previous_state*/)
     gicp_.setTransformationEpsilon(config_.transformation_epsilon);
     gicp_.setEuclideanFitnessEpsilon(config_.fitness_epsilon);
 
-    // GICP-specific settings for better performance
-    gicp_.setRotationEpsilon(1e-4);
-    gicp_.setCorrespondenceRandomness(20);  // Use 20 neighbors for covariance estimation
+    // GICP-specific settings for SPEED (reduced accuracy tradeoff)
+    gicp_.setRotationEpsilon(1e-3);           // Relaxed from 1e-4
+    gicp_.setCorrespondenceRandomness(5);     // Reduced from 20 - major speedup!
+    gicp_.setMaximumOptimizerIterations(10);  // Limit optimizer iterations
 
     // Configure voxel filter
     voxel_filter_.setLeafSize(
         config_.voxel_leaf_size,
         config_.voxel_leaf_size,
         config_.voxel_leaf_size);
+
+    // Initialize feature-based components (NEW)
+    if (config_.use_feature_registration)
+    {
+        RCLCPP_INFO(get_logger(), "Initializing feature-based registration (LOAM-style)");
+
+        // Configure feature extractor
+        FeatureExtractionConfig fe_config;
+        fe_config.edge_threshold = config_.edge_curvature_threshold;
+        fe_config.planar_threshold = config_.planar_curvature_threshold;
+        fe_config.max_edge_features_per_line = config_.max_edge_features / 16;  // Per scan line
+        fe_config.max_planar_features_per_line = config_.max_planar_features / 16;
+        fe_config.min_range = 0.5;
+        fe_config.max_range = 50.0;
+        // Ground filtering for ground robots - skip ground plane points
+        fe_config.filter_ground = true;
+        fe_config.ground_height_min = -0.5;  // Below sensor
+        fe_config.ground_height_max = 0.15;   // Just above ground plane
+        fe_config.sensor_height = 0.3;       // LiDAR height above ground
+        feature_extractor_ = std::make_unique<FeatureExtractor>(fe_config);
+
+        // Configure feature registration
+        FeatureRegistrationConfig fr_config;
+        fr_config.max_iterations = 10;
+        fr_config.convergence_threshold = 1e-4;
+        fr_config.edge_search_radius = 1.0;
+        fr_config.planar_search_radius = 1.0;
+        fr_config.max_edge_residual = 0.5;
+        fr_config.max_planar_residual = 0.3;
+        fr_config.edge_weight = 1.0;
+        fr_config.planar_weight = 0.5;
+        // Enable 2D mode for ground robots - constrain to x, y, yaw only
+        fr_config.is_2d_mode = true;
+        fr_config.ground_height_threshold = 0.3;
+        feature_registration_ = std::make_unique<FeatureRegistration>(fr_config);
+
+        // Configure local map
+        LocalMapConfig lm_config;
+        lm_config.max_keyframes = config_.local_map_size;
+        lm_config.edge_voxel_size = config_.local_map_voxel_size;
+        lm_config.planar_voxel_size = config_.local_map_voxel_size * 2.0;
+        lm_config.update_distance = config_.keyframe_distance;
+        lm_config.update_rotation = config_.keyframe_rotation;
+        local_map_ = std::make_unique<LocalMap>(lm_config);
+
+        RCLCPP_INFO(get_logger(), 
+            "Feature extraction: edge_thresh=%.3f, planar_thresh=%.3f\n"
+            "Local map: size=%d, voxel=%.2f m\n"
+            "2D Mode: ENABLED (ground robot constraints)",
+            config_.edge_curvature_threshold,
+            config_.planar_curvature_threshold,
+            config_.local_map_size,
+            config_.local_map_voxel_size);
+    }
 
     // Initialize covariance
     current_covariance_ = transform_utils::createDiagonalCovariance(
@@ -244,12 +317,14 @@ void LidarOdometry::laserScanCallback(const sensor_msgs::msg::LaserScan::ConstSh
 Eigen::Matrix4f LidarOdometry::predictMotion(double dt)
 {
     /**
-     * Constant velocity motion model:
+     * Constant velocity motion model for GROUND ROBOT (2D):
      * x(t+dt) = x(t) + v * dt
      * R(t+dt) = R(t) * exp(omega * dt)
      *
      * This provides a good initial guess for ICP, significantly improving
      * convergence speed and robustness.
+     * 
+     * For ground robots: z = 0, only yaw rotation (no roll/pitch)
      */
 
     if (dt <= 0.0 || dt > 1.0)
@@ -260,18 +335,18 @@ Eigen::Matrix4f LidarOdometry::predictMotion(double dt)
 
     Eigen::Matrix4f prediction = Eigen::Matrix4f::Identity();
 
-    // Predicted translation
+    // Predicted translation (x, y only for ground robot)
     prediction(0, 3) = static_cast<float>(linear_velocity_.x() * dt);
     prediction(1, 3) = static_cast<float>(linear_velocity_.y() * dt);
-    prediction(2, 3) = static_cast<float>(linear_velocity_.z() * dt);
+    prediction(2, 3) = 0.0f;  // Force z = 0 for ground robot
 
-    // Predicted rotation using Rodrigues' formula for small angles
-    // For small angular velocities: R ≈ I + [omega]_x * dt
-    double angle = angular_velocity_.norm() * dt;
-    if (angle > 1e-6)
+    // Predicted rotation - YAW ONLY for ground robot
+    double yaw_rate = angular_velocity_.z();  // Only z-axis rotation (yaw)
+    double yaw_angle = yaw_rate * dt;
+    
+    if (std::abs(yaw_angle) > 1e-6)
     {
-        Eigen::Vector3d   axis = angular_velocity_.normalized();
-        Eigen::AngleAxisd rotation(angle, axis);
+        Eigen::AngleAxisd rotation(yaw_angle, Eigen::Vector3d::UnitZ());
         prediction.block<3, 3>(0, 0) = rotation.toRotationMatrix().cast<float>();
     }
 
@@ -378,6 +453,66 @@ RegistrationResult LidarOdometry::performRegistration(
     return result;
 }
 
+RegistrationResult LidarOdometry::performFeatureRegistration(
+    const ExtractedFeatures& current_features,
+    const Eigen::Matrix4f& initial_guess)
+{
+    /**
+     * Feature-based registration using LOAM-style point-to-edge and point-to-plane.
+     * 
+     * This method provides better rotation estimation than standard GICP by:
+     * 1. Extracting edge features (high curvature) that constrain rotation strongly
+     * 2. Extracting planar features (low curvature) that constrain translation
+     * 3. Using separate residual types with appropriate Jacobians
+     */
+    auto reg_start = std::chrono::high_resolution_clock::now();
+    RegistrationResult result;
+
+    // Check if local map is ready
+    if (!local_map_ || !local_map_->isReady())
+    {
+        RCLCPP_DEBUG(get_logger(), "Local map not ready for feature registration");
+        return result;
+    }
+
+    // Check if we have features
+    if (!current_features.hasFeatures())
+    {
+        RCLCPP_DEBUG(get_logger(), "No features extracted from current scan");
+        return result;
+    }
+
+    // Set target maps
+    feature_registration_->setTargetEdges(local_map_->getEdgeMap());
+    feature_registration_->setTargetPlanars(local_map_->getPlanarMap());
+
+    // Perform feature-based alignment
+    auto feature_result = feature_registration_->align(
+        current_features.edge_points,
+        current_features.planar_points,
+        initial_guess);
+
+    auto reg_end = std::chrono::high_resolution_clock::now();
+    double reg_time_ms = std::chrono::duration<double, std::milli>(reg_end - reg_start).count();
+
+    // Convert to RegistrationResult
+    result.transformation = feature_result.transformation;
+    result.fitness_score = feature_result.overall_fitness;
+    result.converged = feature_result.converged;
+    result.degenerate = feature_result.degenerate;
+    result.num_correspondences = feature_result.edge_correspondences + 
+                                  feature_result.planar_correspondences;
+
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+        "[FEATURE] Done in %.1f ms: converged=%d, fitness=%.4f, "
+        "edge_corr=%d, planar_corr=%d, iter=%d",
+        reg_time_ms, result.converged, result.fitness_score,
+        feature_result.edge_correspondences, feature_result.planar_correspondences,
+        feature_result.iterations);
+
+    return result;
+}
+
 bool LidarOdometry::checkDegeneracy(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud)
 {
     /**
@@ -466,6 +601,16 @@ void LidarOdometry::processPointCloud(
         has_previous_frame_  = true;
         initialized_         = true;
 
+        // Initialize feature-based components with first scan
+        if (config_.use_feature_registration && feature_extractor_ && local_map_)
+        {
+            auto features = feature_extractor_->extractUnorganized(filtered_cloud, timestamp);
+            local_map_->addKeyframe(features, current_pose_);
+            RCLCPP_INFO(get_logger(), 
+                "Feature extraction initialized: %zu edges, %zu planars",
+                features.edge_points->size(), features.planar_points->size());
+        }
+
         current_pose_.timestamp = timestamp;
         publishOdometry(timestamp);
 
@@ -510,48 +655,95 @@ void LidarOdometry::processPointCloud(
     RegistrationResult result;
     Pose3D             reference_pose;
 
-    // Strategy 1: Frame-to-frame registration (primary, fast)
-    RCLCPP_WARN(get_logger(), "[STRATEGY1] Frame-to-frame: has_prev=%d, prev_size=%zu",
-        has_previous_frame_, previous_cloud_ ? previous_cloud_->size() : 0);
-    
-    if (has_previous_frame_ &&
-        previous_cloud_->size() >= static_cast<size_t>(config_.min_points_threshold))
+    // Extract features for feature-based registration
+    ExtractedFeatures current_features;
+    if (config_.use_feature_registration && feature_extractor_)
     {
-        result = performRegistration(filtered_cloud, previous_cloud_, motion_prediction);
-        
-        RCLCPP_WARN(get_logger(), 
-            "[STRATEGY1] Result: converged=%d, fitness=%.4f (thresh=%.4f)",
-            result.converged, result.fitness_score, config_.frame_fitness_threshold);
+        auto feature_start = std::chrono::high_resolution_clock::now();
+        current_features = feature_extractor_->extractUnorganized(filtered_cloud, timestamp);
+        auto feature_end = std::chrono::high_resolution_clock::now();
+        double feature_time_ms = std::chrono::duration<double, std::milli>(feature_end - feature_start).count();
 
-        if (result.converged && result.fitness_score < config_.frame_fitness_threshold)
+        RCLCPP_DEBUG(get_logger(), 
+            "[FEATURES] Extracted %zu edges, %zu planars in %.1f ms",
+            current_features.edge_points->size(),
+            current_features.planar_points->size(),
+            feature_time_ms);
+    }
+
+    // Strategy 0: Feature-based scan-to-map registration (NEW, best for rotation)
+    if (config_.use_feature_registration && 
+        local_map_ && local_map_->isReady() && 
+        current_features.hasFeatures())
+    {
+        result = performFeatureRegistration(current_features, motion_prediction);
+
+        if (result.converged && result.fitness_score < config_.fitness_threshold)
         {
-            // Validate the transformation magnitude
             double translation_mag = result.transformation.block<3, 1>(0, 3).norm();
 
-            if (translation_mag < config_.max_frame_distance)
+            if (translation_mag < config_.max_frame_distance * 2.0)  // More lenient for scan-to-map
             {
-                registration_success  = true;
-                reference_pose        = previous_pose_;
+                registration_success = true;
+                reference_pose = Pose3D();  // Feature registration gives global pose delta
+                reference_pose.position = Eigen::Vector3d::Zero();
+                reference_pose.orientation = Eigen::Quaterniond::Identity();
                 consecutive_failures_ = 0;
 
-                // Update velocity estimate for next prediction
                 updateVelocityEstimate(result.transformation, dt);
 
-                RCLCPP_WARN(
-                    get_logger(),
-                    "Frame-to-frame: fitness=%.4f, translation=%.4f m",
-                    result.fitness_score,
-                    translation_mag);
+                RCLCPP_DEBUG(get_logger(),
+                    "Feature-based: fitness=%.4f, translation=%.4f m",
+                    result.fitness_score, translation_mag);
             }
-            else
+        }
+    }
+
+    // Strategy 1: Frame-to-frame GICP registration (fallback)
+    if (!registration_success)
+    {
+        RCLCPP_DEBUG(get_logger(), "[STRATEGY1] Frame-to-frame: has_prev=%d, prev_size=%zu",
+            has_previous_frame_, previous_cloud_ ? previous_cloud_->size() : 0);
+        
+        if (has_previous_frame_ &&
+            previous_cloud_->size() >= static_cast<size_t>(config_.min_points_threshold))
+        {
+            result = performRegistration(filtered_cloud, previous_cloud_, motion_prediction);
+            
+            RCLCPP_DEBUG(get_logger(), 
+                "[STRATEGY1] Result: converged=%d, fitness=%.4f (thresh=%.4f)",
+                result.converged, result.fitness_score, config_.frame_fitness_threshold);
+
+            if (result.converged && result.fitness_score < config_.frame_fitness_threshold)
             {
-                RCLCPP_WARN_THROTTLE(
-                    get_logger(),
-                    *get_clock(),
-                    500,
-                    "Frame-to-frame translation too large: %.2f m (max: %.2f m)",
-                    translation_mag,
-                    config_.max_frame_distance);
+                // Validate the transformation magnitude
+                double translation_mag = result.transformation.block<3, 1>(0, 3).norm();
+
+                if (translation_mag < config_.max_frame_distance)
+                {
+                    registration_success  = true;
+                    reference_pose        = previous_pose_;
+                    consecutive_failures_ = 0;
+
+                    // Update velocity estimate for next prediction
+                    updateVelocityEstimate(result.transformation, dt);
+
+                    RCLCPP_DEBUG(
+                        get_logger(),
+                        "Frame-to-frame: fitness=%.4f, translation=%.4f m",
+                        result.fitness_score,
+                        translation_mag);
+                }
+                else
+                {
+                    RCLCPP_WARN_THROTTLE(
+                        get_logger(),
+                        *get_clock(),
+                        500,
+                        "Frame-to-frame translation too large: %.2f m (max: %.2f m)",
+                        translation_mag,
+                        config_.max_frame_distance);
+                }
             }
         }
     }
@@ -628,6 +820,18 @@ void LidarOdometry::processPointCloud(
         // Compose with reference pose to get current pose
         current_pose_ = transform_utils::composePoses(reference_pose, delta_pose);
 
+        // ENFORCE 2D CONSTRAINT for ground robots
+        // Keep z at 0, remove roll and pitch from orientation
+        current_pose_.position.z() = 0.0;
+        
+        // Extract yaw using atan2 (avoids euler angle 180° discontinuities)
+        // For rotation matrix R_pose: yaw = atan2(R(1,0), R(0,0))
+        Eigen::Matrix3d R_pose = current_pose_.orientation.toRotationMatrix();
+        double yaw = std::atan2(R_pose(1, 0), R_pose(0, 0));
+        current_pose_.orientation = Eigen::Quaterniond(
+            Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()));
+        current_pose_.orientation.normalize();
+
         // Update covariance based on fitness
         updateCovariance(result.fitness_score, result.degenerate);
     }
@@ -638,12 +842,22 @@ void LidarOdometry::processPointCloud(
         predicted_delta.position = Eigen::Vector3d(
             motion_prediction(0, 3),
             motion_prediction(1, 3),
-            motion_prediction(2, 3));
+            0.0);  // Force z = 0 for ground robot
         predicted_delta.orientation =
             Eigen::Quaterniond(motion_prediction.block<3, 3>(0, 0).cast<double>());
-        predicted_delta.orientation.normalize();  // FIX: Add normalization
+        predicted_delta.orientation.normalize();
 
         current_pose_ = transform_utils::composePoses(previous_pose_, predicted_delta);
+
+        // ENFORCE 2D CONSTRAINT for ground robots
+        current_pose_.position.z() = 0.0;
+        
+        // Extract yaw using atan2 (avoids euler angle 180° discontinuities)
+        Eigen::Matrix3d R_pose = current_pose_.orientation.toRotationMatrix();
+        double yaw = std::atan2(R_pose(1, 0), R_pose(0, 0));
+        current_pose_.orientation = Eigen::Quaterniond(
+            Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()));
+        current_pose_.orientation.normalize();
 
         // FIX: Reset to base covariance then scale (don't compound)
         double failure_scale = std::min(10.0, 1.0 + consecutive_failures_ * 2.0);
@@ -674,7 +888,19 @@ void LidarOdometry::processPointCloud(
         last_keyframe_cloud_       = filtered_cloud;
         last_keyframe_pose_        = current_pose_;
         cumulative_drift_estimate_ = 0.0;  // Reset drift estimate on keyframe
-        RCLCPP_WARN(
+
+        // Update local map with new keyframe features
+        if (config_.use_feature_registration && local_map_ && current_features.hasFeatures())
+        {
+            local_map_->addKeyframe(current_features, current_pose_);
+            RCLCPP_DEBUG(get_logger(),
+                "Local map updated: %zu keyframes, %zu edges, %zu planars",
+                local_map_->numKeyframes(),
+                local_map_->numEdgePoints(),
+                local_map_->numPlanarPoints());
+        }
+
+        RCLCPP_INFO(
             get_logger(),
             "Keyframe updated at position (%.2f, %.2f, %.2f)",
             current_pose_.position.x(),
@@ -717,9 +943,9 @@ LidarOdometry::filterPointCloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud
     {
         if (std::isfinite(pt.x) && std::isfinite(pt.y) && std::isfinite(pt.z))
         {
-            // Optional: Remove points too close (sensor noise) or too far
+            // Remove points too close (sensor noise) or too far
             float dist = std::sqrt(pt.x * pt.x + pt.y * pt.y + pt.z * pt.z);
-            if (dist > 0.3f && dist < 50.0f)  // Min 0.3m, max 50m
+            if (dist > 0.5f && dist < 30.0f)  // Tighter range: 0.5m to 30m
             {
                 clean_cloud->push_back(pt);
             }
@@ -734,6 +960,23 @@ LidarOdometry::filterPointCloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud
     // Apply voxel filter
     voxel_filter_.setInputCloud(clean_cloud);
     voxel_filter_.filter(*filtered);
+
+    // Additional random downsampling if still too many points
+    // Target: ~500-800 points for fast GICP
+    const size_t MAX_POINTS = 800;
+    if (filtered->size() > MAX_POINTS)
+    {
+        pcl::PointCloud<pcl::PointXYZ>::Ptr downsampled(new pcl::PointCloud<pcl::PointXYZ>());
+        downsampled->reserve(MAX_POINTS);
+        
+        // Uniform sampling
+        size_t step = filtered->size() / MAX_POINTS;
+        for (size_t i = 0; i < filtered->size() && downsampled->size() < MAX_POINTS; i += step)
+        {
+            downsampled->push_back(filtered->points[i]);
+        }
+        return downsampled;
+    }
 
     return filtered;
 }

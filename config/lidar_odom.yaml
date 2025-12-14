@@ -1,7 +1,7 @@
 # LiDAR Odometry Parameters
 # 
-# This configuration provides optimized defaults for frame-to-frame
-# odometry with keyframe-based drift correction.
+# FEATURE-BASED REGISTRATION (LOAM-style)
+# Provides better rotation estimation through edge/planar feature matching
 
 lidar_odom_node:
   ros__parameters:
@@ -9,35 +9,51 @@ lidar_odom_node:
     is_3d: true
     
     # Keyframe thresholds
-    # Keyframes are created when the robot moves beyond these thresholds
-    # from the last keyframe. Smaller values = more keyframes = less drift
-    # but higher computational cost.
-    keyframe_distance: 0.15      # meters (was 0.5)
-    keyframe_rotation: 0.1       # radians (was 0.2)
+    keyframe_distance: 0.3       # meters - triggers local map update
+    keyframe_rotation: 0.15      # radians (~8.5 degrees)
     
-    # Voxel filter leaf size
-    # Smaller = more points retained = more accurate but slower
-    # Larger = fewer points = faster but less accurate
-    voxel_leaf_size: 0.1        # meters (was 0.1)
+    # Voxel filter leaf size (for GICP fallback)
+    voxel_leaf_size: 0.15        # meters
     
-    # GICP parameters
-    max_correspondence_dist: 0.5  # meters (was 1.0) - max distance for point pairs
-    max_iterations: 30            # (was 50) - reduced with better initial guess
-    transformation_epsilon: 1.0e-5  # convergence threshold for transformation
-    fitness_epsilon: 1.0e-3       # convergence threshold for fitness
+    # GICP parameters (fallback registration)
+    max_correspondence_dist: 1.0  # meters
+    max_iterations: 15            # iterations
+    transformation_epsilon: 1.0e-4
+    fitness_epsilon: 1.0e-2
     
     # Covariance estimation
-    nominal_pos_std: 0.01         # meters - base position uncertainty
-    nominal_rot_std: 0.01         # radians - base rotation uncertainty
-    poor_fit_scale: 3.0           # covariance multiplier for poor fitness
-    fitness_threshold: 0.5        # threshold for "good" keyframe registration
+    nominal_pos_std: 0.02         # meters
+    nominal_rot_std: 0.02         # radians
+    poor_fit_scale: 3.0
+    fitness_threshold: 0.8        # threshold for valid registration
     
-    # Frame-to-frame specific parameters (NEW)
-    frame_fitness_threshold: 0.8  # more lenient for consecutive frames
-    max_frame_distance: 0.5       # max expected motion between frames (m)
-    velocity_filter_alpha: 0.3    # EMA smoothing for velocity (0-1)
-    min_points_threshold: 100     # minimum points for valid registration
-    degeneracy_threshold: 100.0   # eigenvalue ratio for degeneracy detection
+    # Frame-to-frame parameters
+    frame_fitness_threshold: 1.0
+    max_frame_distance: 1.0       # max expected motion between frames (m)
+    velocity_filter_alpha: 0.3
+    min_points_threshold: 50
+    degeneracy_threshold: 100.0
+    
+    # ========================================
+    # FEATURE-BASED REGISTRATION (NEW)
+    # ========================================
+    
+    # Enable/disable feature-based registration
+    use_feature_registration: true
+    
+    # Feature extraction thresholds (LOAM-style curvature)
+    # Higher edge_threshold = fewer, sharper edges
+    # Lower planar_threshold = fewer, flatter surfaces
+    edge_curvature_threshold: 0.1
+    planar_curvature_threshold: 0.01
+    
+    # Maximum features per scan
+    max_edge_features: 400        # corners, edges of objects
+    max_planar_features: 800      # walls, ground, flat surfaces
+    
+    # Local map configuration
+    local_map_size: 10            # number of keyframes in sliding window
+    local_map_voxel_size: 0.2     # downsampling for map points
     
     # Frame IDs
     odom_frame_id: "odom"
