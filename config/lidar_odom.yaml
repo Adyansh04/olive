@@ -1,0 +1,44 @@
+# LiDAR Odometry Parameters
+# 
+# This configuration provides optimized defaults for frame-to-frame
+# odometry with keyframe-based drift correction.
+
+lidar_odom_node:
+  ros__parameters:
+    # LiDAR type
+    is_3d: true
+    
+    # Keyframe thresholds
+    # Keyframes are created when the robot moves beyond these thresholds
+    # from the last keyframe. Smaller values = more keyframes = less drift
+    # but higher computational cost.
+    keyframe_distance: 0.15      # meters (was 0.5)
+    keyframe_rotation: 0.1       # radians (was 0.2)
+    
+    # Voxel filter leaf size
+    # Smaller = more points retained = more accurate but slower
+    # Larger = fewer points = faster but less accurate
+    voxel_leaf_size: 0.1        # meters (was 0.1)
+    
+    # GICP parameters
+    max_correspondence_dist: 0.5  # meters (was 1.0) - max distance for point pairs
+    max_iterations: 30            # (was 50) - reduced with better initial guess
+    transformation_epsilon: 1.0e-5  # convergence threshold for transformation
+    fitness_epsilon: 1.0e-3       # convergence threshold for fitness
+    
+    # Covariance estimation
+    nominal_pos_std: 0.01         # meters - base position uncertainty
+    nominal_rot_std: 0.01         # radians - base rotation uncertainty
+    poor_fit_scale: 3.0           # covariance multiplier for poor fitness
+    fitness_threshold: 0.5        # threshold for "good" keyframe registration
+    
+    # Frame-to-frame specific parameters (NEW)
+    frame_fitness_threshold: 0.8  # more lenient for consecutive frames
+    max_frame_distance: 0.5       # max expected motion between frames (m)
+    velocity_filter_alpha: 0.3    # EMA smoothing for velocity (0-1)
+    min_points_threshold: 100     # minimum points for valid registration
+    degeneracy_threshold: 100.0   # eigenvalue ratio for degeneracy detection
+    
+    # Frame IDs
+    odom_frame_id: "odom"
+    lidar_frame_id: "lidar_link"

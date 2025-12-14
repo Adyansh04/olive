@@ -1,13 +1,15 @@
 cmake_minimum_required(VERSION 3.8)
 project(olive)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Default to C++17
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic -O3)
+  # add_compile_options(-Wall -Wextra -Wpedantic -O3 -march=native -DNDEBUG)
 endif()
 
 # Find dependencies
@@ -57,7 +59,20 @@ set(COMMON_DEPENDENCIES
   cv_bridge
   image_transport
 )
-    
+
+# Node: Lidar Odometry 
+add_executable(lidar_odom_node
+  src/nodes/lidar_odom_node.cpp
+  src/lidar_odom/lidar_odometry.cpp
+)
+ament_target_dependencies(lidar_odom_node ${COMMON_DEPENDENCIES})
+target_link_libraries(lidar_odom_node ${PCL_LIBRARIES})
+
+# Install targets
+install(TARGETS
+  lidar_odom_node
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 # Install launch files
 install(DIRECTORY
@@ -76,6 +91,23 @@ install(DIRECTORY
   include/
   DESTINATION include
 )
+
+#####################################
+# Example: If you don't have a target yet, create a dummy one or your main library
+add_library(${PROJECT_NAME} SHARED
+  src/dummy.cpp # You might need to create an empty dummy.cpp if you have no sources yet
+)
+
+target_include_directories(${PROJECT_NAME} PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+ament_target_dependencies(${PROJECT_NAME}
+  ${COMMON_DEPENDENCIES}
+  Eigen3
+)
+####################################
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
