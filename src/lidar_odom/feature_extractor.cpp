@@ -1,27 +1,28 @@
 /**
  * @file feature_extractor.cpp
- * @brief Implementation of LOAM-style feature extraction
+ * @brief Implementation of curvature-based feature extraction
+ *
+ * Extracts edge and planar features based on local surface curvature.
+ * Edge features constrain rotation, planar features constrain translation.
  */
 
 #include "olive/lidar_odom/feature_extractor.hpp"
 
 #include <pcl/common/centroid.h>
-#include <pcl/kdtree/kdtree_flann.h>
 
 #include <algorithm>
 #include <cmath>
-#include <numeric>
 
 namespace olive
 {
 
 FeatureExtractor::FeatureExtractor(const FeatureExtractionConfig& config)
-    : config_(config)
+  : config_(config)
+  , kdtree_(new pcl::KdTreeFLANN<pcl::PointXYZ>())
 {}
 
-ExtractedFeatures FeatureExtractor::extractUnorganized(
-    const PointCloudConstPtr& cloud,
-    double timestamp)
+ExtractedFeatures
+    FeatureExtractor::extractUnorganized(const PointCloudConstPtr& cloud, double timestamp)
 {
     ExtractedFeatures features;
     features.timestamp = timestamp;
@@ -31,7 +32,7 @@ ExtractedFeatures FeatureExtractor::extractUnorganized(
         return features;
     }
 
-    // Step 1: Compute curvature for all valid points
+    // Compute curvature for all valid points
     auto points_with_curvature = computeCurvatureUnorganized(cloud);
 
     if (points_with_curvature.empty())
@@ -39,19 +40,40 @@ ExtractedFeatures FeatureExtractor::extractUnorganized(
         return features;
     }
 
-    // Step 2: Sort by curvature (descending for edge selection)
-    std::vector<PointWithCurvature> sorted_points = points_with_curvature;
-    std::sort(sorted_points.begin(), sorted_points.end(),
-        [](const PointWithCurvature& a, const PointWithCurvature& b) {
-            return a.curvature > b.curvature;
-        });
+    // Calculate limits
+    const int max_edges = std::min(
+        config_.max_edge_features_per_line * config_.num_scan_lines,
+        static_cast<int>(points_with_curvature.size()));
+    const int max_planars = std::min(
+        config_.max_planar_features_per_line * config_.num_scan_lines,
+        static_cast<int>(points_with_curvature.size()));
 
-    // Step 3: Select edge features (high curvature)
-    int edge_count = 0;
-    int max_edges = config_.max_edge_features_per_line * config_.num_scan_lines;
-
-    for (auto& pt : sorted_points)
+    // PERF: Use partial_sort for top-N edges (high curvature) instead of full sort
+    if (max_edges > 0 && max_edges < static_cast<int>(points_with_curvature.size()))
     {
+        std::partial_sort(
+            points_with_curvature.begin(),
+            points_with_curvature.begin() + max_edges,
+            points_with_curvature.end(),
+            [](const PointWithCurvature& a, const PointWithCurvature& b) {
+                return a.curvature > b.curvature;
+            });
+    }
+    else
+    {
+        std::sort(
+            points_with_curvature.begin(),
+            points_with_curvature.end(),
+            [](const PointWithCurvature& a, const PointWithCurvature& b) {
+                return a.curvature > b.curvature;
+            });
+    }
+
+    // Select edge features (high curvature)
+    int edge_count = 0;
+    for (int i = 0; i < max_edges && edge_count < max_edges; ++i)
+    {
+        auto& pt = points_with_curvature[i];
         if (!pt.is_valid)
             continue;
 
@@ -59,25 +81,45 @@ ExtractedFeatures FeatureExtractor::extractUnorganized(
         {
             features.edge_points->push_back(pt.point);
             pt.is_valid = false;  // Mark as used
-            edge_count++;
-
-            if (edge_count >= max_edges)
-                break;
+            ++edge_count;
         }
     }
 
-    // Step 4: Re-sort for planar selection (ascending curvature)
-    std::sort(sorted_points.begin(), sorted_points.end(),
-        [](const PointWithCurvature& a, const PointWithCurvature& b) {
-            return a.curvature < b.curvature;
-        });
+    // PERF: Use partial_sort for bottom-N planars (low curvature)
+    // Sort remaining valid points by ascending curvature
+    auto valid_end = std::partition(
+        points_with_curvature.begin(),
+        points_with_curvature.end(),
+        [](const PointWithCurvature& pt) { return pt.is_valid; });
 
-    // Step 5: Select planar features (low curvature)
-    int planar_count = 0;
-    int max_planars = config_.max_planar_features_per_line * config_.num_scan_lines;
+    const int remaining = static_cast<int>(std::distance(points_with_curvature.begin(), valid_end));
+    const int sort_count = std::min(max_planars, remaining);
 
-    for (auto& pt : sorted_points)
+    if (sort_count > 0 && sort_count < remaining)
     {
+        std::partial_sort(
+            points_with_curvature.begin(),
+            points_with_curvature.begin() + sort_count,
+            valid_end,
+            [](const PointWithCurvature& a, const PointWithCurvature& b) {
+                return a.curvature < b.curvature;
+            });
+    }
+    else if (sort_count > 0)
+    {
+        std::sort(
+            points_with_curvature.begin(),
+            valid_end,
+            [](const PointWithCurvature& a, const PointWithCurvature& b) {
+                return a.curvature < b.curvature;
+            });
+    }
+
+    // Select planar features (low curvature)
+    int planar_count = 0;
+    for (int i = 0; i < sort_count && planar_count < max_planars; ++i)
+    {
+        auto& pt = points_with_curvature[i];
         if (!pt.is_valid)
             continue;
 
@@ -85,33 +127,32 @@ ExtractedFeatures FeatureExtractor::extractUnorganized(
         {
             features.planar_points->push_back(pt.point);
             pt.is_valid = false;
-            planar_count++;
-
-            if (planar_count >= max_planars)
-                break;
+            ++planar_count;
         }
     }
 
-    // Step 6: Store valid points for full cloud (useful for fallback)
+    // Store all valid points for fallback GICP
     for (const auto& pt : points_with_curvature)
     {
-        features.full_cloud->push_back(pt.point);
+        if (pt.is_valid || features.full_cloud->size() < 5000)
+        {
+            features.full_cloud->push_back(pt.point);
+        }
     }
 
     return features;
 }
 
-ExtractedFeatures FeatureExtractor::extractOrganized(
-    const PointCloudConstPtr& cloud,
-    double timestamp)
+ExtractedFeatures
+    FeatureExtractor::extractOrganized(const PointCloudConstPtr& cloud, double timestamp)
 {
-    // For now, treat organized clouds the same as unorganized
-    // TODO: Implement proper scan line extraction for real LiDARs
+    // For simulation LiDAR, treat as unorganized
+    // Real LiDARs with ring info would use scan line structure
     return extractUnorganized(cloud, timestamp);
 }
 
-std::vector<PointWithCurvature> FeatureExtractor::computeCurvatureUnorganized(
-    const PointCloudConstPtr& cloud)
+std::vector<PointWithCurvature>
+    FeatureExtractor::computeCurvatureUnorganized(const PointCloudConstPtr& cloud)
 {
     std::vector<PointWithCurvature> result;
     result.reserve(cloud->size());
@@ -119,65 +160,64 @@ std::vector<PointWithCurvature> FeatureExtractor::computeCurvatureUnorganized(
     if (cloud->size() < 20)
     {
         return result;
-    }
+    }  // Not enough points
 
-    // Build KD-tree for neighbor search
-    pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
-    kdtree.setInputCloud(cloud);
+    // Build KD-Tree for neighborhood search
+    kdtree_->setInputCloud(cloud);
 
-    // Number of neighbors for curvature computation
-    const int k_neighbors = 2 * config_.curvature_region + 1;
-    std::vector<int> indices(k_neighbors);
+    const int          k_neighbors = 2 * config_.curvature_region + 1;
+    std::vector<int>   indices(k_neighbors);
     std::vector<float> distances(k_neighbors);
 
     for (size_t i = 0; i < cloud->size(); ++i)
     {
         const auto& pt = (*cloud)[i];
 
-        // Skip invalid points
+        // PERF: Early rejection before KNN search
         if (!isValidPoint(pt))
         {
             continue;
         }
 
+        PointWithCurvature pwc;
+        pwc.point    = pt;
+        pwc.is_valid = true;
+
         // Find k nearest neighbors
-        int found = kdtree.nearestKSearch(pt, k_neighbors, indices, distances);
+        int found = kdtree_->nearestKSearch(pt, k_neighbors, indices, distances);
 
         if (found < k_neighbors)
         {
+            pwc.is_valid = false;
+            result.push_back(pwc);
             continue;
         }
 
-        // Compute curvature as deviation from local plane
-        // Using LOAM-style curvature: c = ||sum(p_j - p_i)||^2 / (n * ||p_i||^2)
-        Eigen::Vector3f diff_sum = Eigen::Vector3f::Zero();
-        Eigen::Vector3f pt_vec(pt.x, pt.y, pt.z);
+        // Compute curvature as deviation from local centroid
+        // c = ||p - mean(neighbors)|| / mean_dist
+        Eigen::Vector3f centroid   = Eigen::Vector3f::Zero();
+        float           total_dist = 0.0f;
 
         for (int j = 0; j < found; ++j)
         {
-            if (indices[j] == static_cast<int>(i))
-                continue;
-
             const auto& neighbor = (*cloud)[indices[j]];
-            Eigen::Vector3f neighbor_vec(neighbor.x, neighbor.y, neighbor.z);
-            diff_sum += (neighbor_vec - pt_vec);
+            centroid += Eigen::Vector3f(neighbor.x, neighbor.y, neighbor.z);
+            total_dist += std::sqrt(distances[j]);
         }
 
-        float range_sq = pt_vec.squaredNorm();
-        if (range_sq < 1e-6f)
+        centroid /= static_cast<float>(found);
+        float mean_dist = total_dist / static_cast<float>(found);
+
+        if (mean_dist < 1e-6f)
         {
-            continue;
+            pwc.curvature = 0.0f;
         }
-
-        // Curvature formula (normalized by range to be scale-invariant)
-        float curvature = diff_sum.squaredNorm() / (static_cast<float>(found - 1) * range_sq);
-
-        PointWithCurvature pwc;
-        pwc.point = pt;
-        pwc.curvature = curvature;
-        pwc.scan_line = 0;  // Unknown for unorganized
-        pwc.index_in_line = static_cast<int>(i);
-        pwc.is_valid = true;
+        else
+        {
+            Eigen::Vector3f pt_vec(pt.x, pt.y, pt.z);
+            float           deviation = (pt_vec - centroid).norm();
+            pwc.curvature             = deviation / mean_dist;
+        }
 
         result.push_back(pwc);
     }
@@ -185,34 +225,33 @@ std::vector<PointWithCurvature> FeatureExtractor::computeCurvatureUnorganized(
     return result;
 }
 
-std::vector<std::vector<PointWithCurvature>> FeatureExtractor::computeCurvatureOrganized(
-    const PointCloudConstPtr& cloud)
+std::vector<std::vector<PointWithCurvature>>
+    FeatureExtractor::computeCurvatureOrganized(const PointCloudConstPtr& /*cloud*/)
 {
-    // Placeholder for organized point cloud processing
-    // This would use the ring/scan line structure of real LiDARs
-    std::vector<std::vector<PointWithCurvature>> result;
-    return result;
+    // TODO: Placeholder for organized point cloud processing
+    //  Would use ring/scan line structure of real LiDARs
+    return {};
 }
 
 void FeatureExtractor::selectFeatures(
-    std::vector<PointWithCurvature>& points,
-    PointCloudPtr& edge_cloud,
-    PointCloudPtr& planar_cloud,
-    int max_edges,
-    int max_planars)
+    std::vector<PointWithCurvature>& /*points*/,
+    PointCloudPtr& /*edge_cloud*/,
+    PointCloudPtr& /*planar_cloud*/,
+    int /*max_edges*/,
+    int /*max_planars*/)
 {
-    // This is used for organized extraction with sectors
-    // Currently not implemented - using simpler approach
+    // TODO: Used for organized extraction with sectors - not implemented
 }
 
 void FeatureExtractor::markNeighborsInvalid(
     std::vector<PointWithCurvature>& points,
-    int center_idx,
-    int radius)
+    int                              center_idx,
+    int                              radius)
 {
-    for (int i = std::max(0, center_idx - radius);
-         i <= std::min(static_cast<int>(points.size()) - 1, center_idx + radius);
-         ++i)
+    const int start = std::max(0, center_idx - radius);
+    const int end   = std::min(static_cast<int>(points.size()) - 1, center_idx + radius);
+
+    for (int i = start; i <= end; ++i)
     {
         if (i != center_idx)
         {
@@ -223,30 +262,26 @@ void FeatureExtractor::markNeighborsInvalid(
 
 bool FeatureExtractor::isValidPoint(const pcl::PointXYZ& pt) const
 {
-    // Check for NaN
+    // Check for NaN/Inf
     if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z))
     {
         return false;
     }
 
-    // Check range
-    float range = computeRange(pt);
+    // Check range bounds
+    const float range = computeRange(pt);
     if (range < config_.min_range || range > config_.max_range)
     {
         return false;
     }
 
-    // Filter ground plane points (for ground robots)
-    // Points near the ground provide poor constraints and cause Z drift
+    // Ground filtering for ground robots
     if (config_.filter_ground)
     {
-        // Point height relative to sensor
-        float height = pt.z;
-        
-        // Check if point is in ground region
-        if (height >= config_.ground_height_min && height <= config_.ground_height_max)
+        // Points below ground_height_max are likely ground
+        if (pt.z < config_.ground_height_max && pt.z > config_.ground_height_min)
         {
-            return false;  // Skip ground points
+            return false;
         }
     }
 

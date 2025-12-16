@@ -2,13 +2,14 @@
  * @file local_map.hpp
  * @brief Sliding window local map for scan-to-map registration
  *
- * Maintains a local submap built from recent keyframes for more
- * robust registration than frame-to-frame matching.
+ * Maintains a local submap built from recent keyframes.
+ * Benefits over frame-to-frame matching:
+ * - More points = stronger geometric constraints
+ * - Averaging effect reduces measurement noise
+ * - Better rotation estimation from accumulated features
  *
- * Benefits:
- * - More points = stronger constraints
- * - Averaging effect reduces noise
- * - Better rotation estimation
+ * Keyframes are added based on motion thresholds.
+ * Old keyframes are removed in FIFO order.
  */
 
 #ifndef OLIVE_LIDAR_LOCAL_MAP_HPP_
@@ -19,53 +20,15 @@
 #include <pcl/point_types.h>
 
 #include <deque>
-#include <memory>
 #include <mutex>
 
-#include "olive/common/types.hpp"
-#include "olive/lidar_odom/feature_extractor.hpp"
+#include "olive/lidar_odom/map_types.hpp"
 
 namespace olive
 {
 
 /**
- * @brief Configuration for local map management
- */
-struct LocalMapConfig
-{
-    // Map size limits
-    int max_keyframes = 10;              ///< Maximum keyframes in sliding window
-    double map_radius = 50.0;            ///< Radius around current pose to keep (m)
-
-    // Downsampling for map points
-    double edge_voxel_size = 0.2;        ///< Voxel size for edge features (m)
-    double planar_voxel_size = 0.4;      ///< Voxel size for planar features (m)
-    double full_voxel_size = 0.3;        ///< Voxel size for full cloud (m)
-
-    // Map update thresholds
-    double update_distance = 0.5;        ///< Min distance to add new keyframe (m)
-    double update_rotation = 0.2;        ///< Min rotation to add new keyframe (rad)
-
-    // Point limits for performance
-    int max_edge_points = 5000;          ///< Max edge points in map
-    int max_planar_points = 10000;       ///< Max planar points in map
-    int max_full_points = 20000;         ///< Max full cloud points in map
-};
-
-/**
- * @brief Keyframe with features and pose
- */
-struct FeatureKeyframe
-{
-    ExtractedFeatures features;          ///< Extracted features
-    Pose3D pose;                         ///< Pose in odom frame
-    double timestamp;
-
-    FeatureKeyframe() : timestamp(0.0) {}
-};
-
-/**
- * @brief Local map manager with sliding window
+ * @brief Sliding window local map manager
  *
  * Accumulates features from recent keyframes into a local submap.
  * The submap is used as the target for scan-to-map registration.
@@ -73,8 +36,8 @@ struct FeatureKeyframe
 class LocalMap
 {
 public:
-    using PointCloud = pcl::PointCloud<pcl::PointXYZ>;
-    using PointCloudPtr = PointCloud::Ptr;
+    using PointCloud         = pcl::PointCloud<pcl::PointXYZ>;
+    using PointCloudPtr      = PointCloud::Ptr;
     using PointCloudConstPtr = PointCloud::ConstPtr;
 
     /**
@@ -183,7 +146,7 @@ private:
 
     // Last keyframe pose (for motion threshold check)
     Pose3D last_keyframe_pose_;
-    bool has_keyframe_ = false;
+    bool   has_keyframe_ = false;
 
     // Voxel filters
     pcl::VoxelGrid<pcl::PointXYZ> edge_filter_;
@@ -192,6 +155,9 @@ private:
 
     // Thread safety
     mutable std::mutex map_mutex_;
+
+    // Preallocated transform buffer
+    PointCloudPtr transform_buffer_;
 };
 
 }  // namespace olive

@@ -95,6 +95,8 @@ inline Eigen::Quaterniond yawToQuaternion(double yaw)
 /**
  * @brief Predict motion using constant velocity model (2D ground robot)
  *
+ * This provides a good initial guess for ICP, significantly improving
+ * convergence speed and robustness.
  * Motion model:
  *   x(t+dt) = x(t) + v * dt
  *   y(t+dt) = y(t) + v * dt
@@ -106,7 +108,9 @@ inline Eigen::Quaterniond yawToQuaternion(double yaw)
  * @return Predicted transformation matrix
  */
 inline Eigen::Matrix4f predictMotion2D(
-    const Eigen::Vector3d& linear_velocity, const Eigen::Vector3d& angular_velocity, double dt)
+    const Eigen::Vector3d& linear_velocity,
+    const Eigen::Vector3d& angular_velocity,
+    double                 dt)
 {
     Eigen::Matrix4f prediction = Eigen::Matrix4f::Identity();
 
@@ -152,9 +156,13 @@ inline Eigen::Matrix4f predictMotion2D(
  * @return Pair of updated (linear, angular) velocities
  */
 inline std::pair<Eigen::Vector3d, Eigen::Vector3d> updateVelocityEMA(
-    const Eigen::Vector3d& current_linear, const Eigen::Vector3d& current_angular,
-    const Eigen::Matrix4f& delta_transform, double dt, double alpha, double max_linear_vel,
-    double max_angular_vel)
+    const Eigen::Vector3d& current_linear,
+    const Eigen::Vector3d& current_angular,
+    const Eigen::Matrix4f& delta_transform,
+    double                 dt,
+    double                 alpha,
+    double                 max_linear_vel,
+    double                 max_angular_vel)
 {
     if (dt <= 0.001)
     {
@@ -218,7 +226,7 @@ inline Eigen::Matrix<double, 6, 6> createCovariance(double pos_std, double rot_s
  * @return Scale factor to apply to covariance
  */
 inline double
-computeCovarianceScale(double fitness, double threshold, double poor_scale, bool degenerate)
+    computeCovarianceScale(double fitness, double threshold, double poor_scale, bool degenerate)
 {
     double scale = 1.0;
 
@@ -246,8 +254,9 @@ computeCovarianceScale(double fitness, double threshold, double poor_scale, bool
  * @param previous Previous quaternion
  * @return Consistent quaternion
  */
-inline Eigen::Quaterniond
-ensureQuaternionConsistency(const Eigen::Quaterniond& current, const Eigen::Quaterniond& previous)
+inline Eigen::Quaterniond ensureQuaternionConsistency(
+    const Eigen::Quaterniond& current,
+    const Eigen::Quaterniond& previous)
 {
     if (current.dot(previous) < 0.0)
     {
@@ -265,7 +274,7 @@ ensureQuaternionConsistency(const Eigen::Quaterniond& current, const Eigen::Quat
  * @return True if motion is within bounds
  */
 inline bool
-isMotionReasonable(const Eigen::Matrix4f& transform, double max_translation, double max_rotation)
+    isMotionReasonable(const Eigen::Matrix4f& transform, double max_translation, double max_rotation)
 {
     // Check translation
     double trans = transform.block<3, 1>(0, 3).norm();

@@ -95,23 +95,6 @@ install(DIRECTORY
   DESTINATION include
 )
 
-#####################################
-# Example: If you don't have a target yet, create a dummy one or your main library
-add_library(${PROJECT_NAME} SHARED
-  src/dummy.cpp # You might need to create an empty dummy.cpp if you have no sources yet
-)
-
-target_include_directories(${PROJECT_NAME} PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-)
-
-ament_target_dependencies(${PROJECT_NAME}
-  ${COMMON_DEPENDENCIES}
-  Eigen3
-)
-####################################
-
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()

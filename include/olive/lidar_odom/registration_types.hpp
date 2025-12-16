@@ -28,7 +28,7 @@ struct FeatureRegistrationConfig
     double convergence_threshold{ 1e-4 };  ///< Delta norm for convergence
     double lambda{ 0.1 };                  ///< Levenberg-Marquardt damping
 
-    // Ground robot constraint
+    // Ground robot constraint (2D constraint)
     bool   is_2d_mode{ true };              ///< Constrain to (x, y, yaw) only
     double ground_height_threshold{ 0.3 };  ///< Height above ground to consider (m)
 

@@ -27,22 +27,22 @@ namespace olive
 struct LocalMapConfig
 {
     // Sliding window size
-    int    max_keyframes{10};       ///< Maximum keyframes in window
-    double map_radius{50.0};        ///< Radius around robot to keep (m)
+    int    max_keyframes{ 10 };  ///< Maximum keyframes in window
+    double map_radius{ 50.0 };   ///< Radius around robot to keep (m)
 
     // Downsampling voxel sizes
-    double edge_voxel_size{0.2};    ///< Voxel size for edge features (m)
-    double planar_voxel_size{0.4};  ///< Voxel size for planar features (m)
-    double full_voxel_size{0.3};    ///< Voxel size for full cloud (m)
+    double edge_voxel_size{ 0.2 };    ///< Voxel size for edge features (m)
+    double planar_voxel_size{ 0.4 };  ///< Voxel size for planar features (m)
+    double full_voxel_size{ 0.3 };    ///< Voxel size for full cloud (m)
 
     // Keyframe insertion thresholds
-    double update_distance{0.5};    ///< Min translation for new keyframe (m)
-    double update_rotation{0.2};    ///< Min rotation for new keyframe (rad)
+    double update_distance{ 0.5 };  ///< Min translation for new keyframe (m)
+    double update_rotation{ 0.2 };  ///< Min rotation for new keyframe (rad)
 
     // Point count limits for performance
-    int max_edge_points{5000};      ///< Max edge points in map
-    int max_planar_points{10000};   ///< Max planar points in map
-    int max_full_points{20000};     ///< Max full cloud points in map
+    int max_edge_points{ 5000 };     ///< Max edge points in map
+    int max_planar_points{ 10000 };  ///< Max planar points in map
+    int max_full_points{ 20000 };    ///< Max full cloud points in map
 };
 
 /**
@@ -50,9 +50,9 @@ struct LocalMapConfig
  */
 struct FeatureKeyframe
 {
-    ExtractedFeatures features;     ///< Extracted features at this pose
-    Pose3D            pose;         ///< Pose in odom frame when captured
-    double            timestamp{0.0};
+    ExtractedFeatures features;  ///< Extracted features at this pose
+    Pose3D            pose;      ///< Pose in odom frame when captured
+    double            timestamp{ 0.0 };
 };
 
 }  // namespace olive

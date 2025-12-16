@@ -1,15 +1,20 @@
 /**
  * @file lidar_odometry.hpp
- * @brief LiDAR odometry with feature-based registration
+ * @brief LiDAR odometry node with two-tier registration
  *
- * Implements LiDAR-based odometry with:
- * - LOAM-style feature extraction (edge + planar features)
- * - Feature-based registration (point-to-edge + point-to-plane)
- * - Local map accumulation for scan-to-map matching
- * - GICP fallback for featureless environments
- * - Keyframe selection heuristic for efficiency
+ * Architecture:
+ * 1. Primary: Feature-based scan-to-map alignment
+ *    - Edge features constrain rotation (yaw)
+ *    - Planar features constrain translation (x, y)
+ * 2. Fallback: GICP when features are insufficient
  *
- * Reference: LOAM, LeGO-LOAM, LIO-SAM
+ * All poses are constrained to (x, y, yaw) for ground robots.
+ *
+ * Pipeline:
+ *   PointCloud -> Filter -> Extract Features -> Align to Map -> Update Pose -> Publish
+ *                                     |
+ *                                     v
+ *                              Maybe Add Keyframe
  */
 
 #ifndef OLIVE_LIDAR_LIDAR_ODOMETRY_HPP_
@@ -19,112 +24,24 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/registration/gicp.h>
-#include <pcl/registration/ndt.h>
 #include <pcl_conversions/pcl_conversions.h>
 
+#include <memory>
 #include <nav_msgs/msg/odometry.hpp>
-#include <pcl/impl/point_types.hpp>
-#include <rclcpp/node_options.hpp>
-#include <rclcpp/rclcpp.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
-#include <rclcpp_lifecycle/node_interfaces/lifecycle_node_interface.hpp>
-#include <rclcpp_lifecycle/state.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
-
-#include <memory>
 
 #include "olive/common/types.hpp"
 #include "olive/lidar_odom/feature_extractor.hpp"
 #include "olive/lidar_odom/feature_registration.hpp"
+#include "olive/lidar_odom/feature_types.hpp"
+#include "olive/lidar_odom/lidar_config.hpp"
 #include "olive/lidar_odom/local_map.hpp"
+#include "olive/lidar_odom/registration_types.hpp"
 
 namespace olive
 {
-
-/**
- * @brief Configuration for Lidar Odometry
- */
-struct LidarConfig
-{
-    bool   is_3d;                    ///< True for 3D Lidar, false for 2D
-    double keyframe_distance;        ///< Minimum distance to create keyframe (m)
-    double keyframe_rotation;        ///< Minimum rotation to create keyframe (rad)
-    double voxel_leaf_size;          ///< Voxel filter leaf size (m)
-    double max_correspondence_dist;  ///< Max correspondence distance for ICP (m)
-    int    max_iterations;           ///< Max ICP iterations
-    double transformation_epsilon;   ///< Transformation epsilon for convergence
-    double fitness_epsilon;          ///< Fitness epsilon for convergence
-    double nominal_pos_std;          ///< Nominal position std deviation(m)
-    double nominal_rot_std;          ///< Nominal rotation std deviation(rad)
-    double poor_fit_scale;           ///< Covariance scale for poor fitness
-    double fitness_threshold;        ///< Threshold for good fitness
-
-    double frame_fitness_threshold;  ///< Threshold for frame-to-frame fitness
-    double max_frame_distance;       ///< Max expected motion between frames (m)
-    double velocity_filter_alpha;    ///< EMA filter coefficient for velocity
-    int    min_points_threshold;     ///< Minimum points for valid registration
-    double degeneracy_threshold;     ///< Eigenvalue ratio for degeneracy detection
-
-    // Feature-based registration settings
-    bool   use_feature_registration; ///< Enable LOAM-style feature registration
-    double edge_curvature_threshold; ///< Curvature threshold for edge features
-    double planar_curvature_threshold; ///< Curvature threshold for planar features
-    int    max_edge_features;        ///< Max edge features per scan
-    int    max_planar_features;      ///< Max planar features per scan
-
-    // Local map settings
-    int    local_map_size;           ///< Number of keyframes in local map
-    double local_map_voxel_size;     ///< Voxel size for local map downsampling
-
-    LidarConfig()
-      : is_3d(true)
-      , keyframe_distance(0.15)       // Reduced from 0.5 for faster updates
-      , keyframe_rotation(0.1)        // Reduced from 0.2
-      , voxel_leaf_size(0.05)         // Reduced from 0.1 for more points
-      , max_correspondence_dist(0.5)  // Reduced from 1.0
-      , max_iterations(30)            // Reduced from 50
-      , transformation_epsilon(1e-5)  // Slightly relaxed
-      , fitness_epsilon(1e-3)         // Slightly relaxed
-      , nominal_pos_std(0.01)         // Reduced from 0.02
-      , nominal_rot_std(0.01)         // Reduced from 0.02
-      , poor_fit_scale(3.0)           // Reduced from 5.0
-      , fitness_threshold(0.5)        // Reduced from 1.0
-      , frame_fitness_threshold(0.8)  // more lenient for frame-to-frame
-      , max_frame_distance(0.5)       // sanity check for motion
-      , velocity_filter_alpha(0.3)    // smoothing factor
-      , min_points_threshold(100)     // minimum valid points
-      , degeneracy_threshold(100.0)   // eigenvalue ratio threshold
-      // Feature-based defaults
-      , use_feature_registration(true)
-      , edge_curvature_threshold(0.1)
-      , planar_curvature_threshold(0.01)
-      , max_edge_features(400)
-      , max_planar_features(800)
-      , local_map_size(10)
-      , local_map_voxel_size(0.2)
-    {}
-};
-
-/**
- * @brief Registration result with quality metrics
- */
-struct RegistrationResult
-{
-    Eigen::Matrix4f transformation;
-    double          fitness_score;
-    bool            converged;
-    bool            degenerate;
-    int             num_correspondences;
-
-    RegistrationResult()
-      : transformation(Eigen::Matrix4f::Identity())
-      , fitness_score(std::numeric_limits<double>::max())
-      , converged(false)
-      , degenerate(false)
-      , num_correspondences(0)
-    {}
-};
 
 class LidarOdometry : public rclcpp_lifecycle::LifecycleNode
 {
@@ -133,107 +50,109 @@ public:
 
     // Lifecycle callbacks
     rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn
-    on_configure(const rclcpp_lifecycle::State& state) override;
+        on_configure(const rclcpp_lifecycle::State& state) override;
 
     rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn
-    on_activate(const rclcpp_lifecycle::State& state) override;
+        on_activate(const rclcpp_lifecycle::State& state) override;
 
     rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn
-    on_deactivate(const rclcpp_lifecycle::State& state) override;
+        on_deactivate(const rclcpp_lifecycle::State& state) override;
 
     rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn
-    on_cleanup(const rclcpp_lifecycle::State& state) override;
+        on_cleanup(const rclcpp_lifecycle::State& state) override;
 
 private:
-    // Callback functions
+    //=== Sensor Callbacks ===
     void pointCloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& msg);
     void laserScanCallback(const sensor_msgs::msg::LaserScan::ConstSharedPtr& msg);
 
-    // Processing functions
+    // === Main Processing Pipeline ===
     void processPointCloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud, double timestamp);
 
-    // Registration methods
-    RegistrationResult performRegistration(
-        const pcl::PointCloud<pcl::PointXYZ>::Ptr& source,
-        const pcl::PointCloud<pcl::PointXYZ>::Ptr& target, const Eigen::Matrix4f& initial_guess);
-
-    // Motion prediction using constant velocity model
-    Eigen::Matrix4f predictMotion(double dt);
-
-    // Update velocity estimate with exponential moving average
-    void updateVelocityEstimate(const Eigen::Matrix4f& delta_transform, double dt);
-
-    // Point cloud processing
+    // === Pipeline Stages ===
     pcl::PointCloud<pcl::PointXYZ>::Ptr
-    filterPointCloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud);
+        filterPointCloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud);
+    ExtractedFeatures
+        extractFeatures(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud, double timestamp);
+    Eigen::Matrix4f computeInitialGuess(double dt);
 
-    // Keyframe management
-    bool shouldCreateKeyframe(const Pose3D& current, const Pose3D& last_keyframe);
-
-    Eigen::Matrix4f estimateTransformation(
+    // === Registration Methods ===
+    RegistrationResult
+        tryFeatureAlign(const ExtractedFeatures& features, const Eigen::Matrix4f& guess);
+    RegistrationResult alignFallbackGICP(
         const pcl::PointCloud<pcl::PointXYZ>::Ptr& source,
-        const pcl::PointCloud<pcl::PointXYZ>::Ptr& target, double& fitness_score);
+        const pcl::PointCloud<pcl::PointXYZ>::Ptr& target,
+        const Eigen::Matrix4f&                     guess);
 
-    // Covariance estimation
-    void updateCovariance(double fitness_score, bool degenerate);
+    // === Pose Update ===
+    void updatePoseFromRegistration(const RegistrationResult& result, const Pose3D& reference);
+    void updatePoseFromPrediction(const Eigen::Matrix4f& predicted_motion);
 
-    // Degeneracy detection using Hessian eigenvalue analysis
-    bool checkDegeneracy(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud);
+    // === Keyframe Management ===
+    bool shouldCreateKeyframe(const Pose3D& current, const Pose3D& keyframe);
+    void maybeAddKeyframe(const ExtractedFeatures& features, const Pose3D& pose);
 
-    // Publishing
+    // === Quality Assessment ===
+    bool isFrameDegenerate(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud);
+    void updateCovariance(double fitness, bool degenerate);
+
+    // === Velocity Estimation ===
+    void updateVelocityEstimate(const Eigen::Matrix4f& delta, double dt);
+
+    // === Publishing ===
     void publishOdometry(double timestamp);
 
-    // Convert laser scan to point cloud (for 2D LiDAR)
+    // === Utilities ===
     pcl::PointCloud<pcl::PointXYZ>::Ptr
-    laserScanToPointCloud(const sensor_msgs::msg::LaserScan::ConstSharedPtr& scan);
+        laserScanToPointCloud(const sensor_msgs::msg::LaserScan::ConstSharedPtr& scan);
 
-    // Configuration
-    LidarConfig config_;
-    std::string odom_frame_id_{ "odom" };
-    std::string lidar_frame_id_{ "lidar_link" };
+    // === Configuration ===
+    LidarConfig               lidar_config_;
+    FrameConfig               frame_config_;
+    FeatureExtractionConfig   feature_config_;
+    FeatureRegistrationConfig registration_config_;
+    LocalMapConfig            map_config_;
 
-    // State - Keyframe tracking
+    // === State: Pose Tracking ===
+    Pose3D             current_pose_;
+    Pose3D             previous_pose_;
+    Pose3D             last_keyframe_pose_;
+    Eigen::Quaterniond previous_orientation_;  // For quaternion consistency
+
+    // === State: Point Clouds ===
     pcl::PointCloud<pcl::PointXYZ>::Ptr last_keyframe_cloud_;
-    Pose3D                              last_keyframe_pose_;
-
-    // State - Frame-to-frame tracking (NEW)
     pcl::PointCloud<pcl::PointXYZ>::Ptr previous_cloud_;
-    Pose3D                              previous_pose_;
-    bool                                has_previous_frame_{ false };
 
-    // State - Velocity estimation (NEW)
+    // === State: Velocity ===
     Eigen::Vector3d linear_velocity_{ Eigen::Vector3d::Zero() };
     Eigen::Vector3d angular_velocity_{ Eigen::Vector3d::Zero() };
     double          last_timestamp_{ 0.0 };
 
-    // State - Current pose and uncertainty
-    pcl::PointCloud<pcl::PointXYZ>::Ptr current_cloud_;
-    Pose3D                              current_pose_;
-    Eigen::Matrix<double, 6, 6>         current_covariance_;
-    bool                                initialized_{ false };
+    // === State: Covariance ===
+    Eigen::Matrix<double, 6, 6> current_covariance_;
 
-    // State - Tracking quality
+    // === State: Tracking Quality ===
+    bool   initialized_{ false };
+    bool   has_previous_frame_{ false };
     int    consecutive_failures_{ 0 };
     double cumulative_drift_estimate_{ 0.0 };
 
-    // PCL components
+    // === PCL Components ===
     pcl::GeneralizedIterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> gicp_;
     pcl::VoxelGrid<pcl::PointXYZ>                                       voxel_filter_;
 
-    // Feature-based components (NEW)
+    // === Feature Components ===
     std::unique_ptr<FeatureExtractor>    feature_extractor_;
     std::unique_ptr<FeatureRegistration> feature_registration_;
     std::unique_ptr<LocalMap>            local_map_;
 
-    // Feature-based methods
-    RegistrationResult performFeatureRegistration(
-        const ExtractedFeatures& current_features,
-        const Eigen::Matrix4f& initial_guess);
-
-    // ROS Interfaces
+    // === ROS Interfaces ===
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr           cloud_sub_;
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr             scan_sub_;
     rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
+
+    // === Reusable Message (avoid per-callback allocation) ===
+    nav_msgs::msg::Odometry odom_msg_;
 };
 
 }  // namespace olive

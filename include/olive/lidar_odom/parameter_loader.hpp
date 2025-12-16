@@ -10,6 +10,7 @@
 #define OLIVE_LIDAR_PARAMETER_LOADER_HPP_
 
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp_lifecycle/lifecycle_node.hpp>
 
 #include "olive/lidar_odom/feature_types.hpp"
 #include "olive/lidar_odom/lidar_config.hpp"
@@ -32,9 +33,12 @@ namespace parameter_loader
  * @param map_config Output: Local map config
  */
 inline void loadAllParameters(
-    rclcpp::Node& node, LidarConfig& lidar_config, FrameConfig& frame_config,
-    FeatureExtractionConfig& feature_config, FeatureRegistrationConfig& registration_config,
-    LocalMapConfig& map_config)
+    rclcpp_lifecycle::LifecycleNode& node,
+    LidarConfig&                     lidar_config,
+    FrameConfig&                     frame_config,
+    FeatureExtractionConfig&         feature_config,
+    FeatureRegistrationConfig&       registration_config,
+    LocalMapConfig&                  map_config)
 {
     // === Core LiDAR Parameters ===
     node.declare_parameter("is_3d", lidar_config.is_3d);
@@ -148,7 +152,7 @@ inline void loadAllParameters(
  * @brief Log all loaded parameters
  */
 inline void
-logParameters(const rclcpp::Logger& logger, const LidarConfig& config, const FrameConfig& frames)
+    logParameters(const rclcpp::Logger& logger, const LidarConfig& config, const FrameConfig& frames)
 {
     RCLCPP_INFO(
         logger,

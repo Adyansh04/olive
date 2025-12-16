@@ -1,127 +1,47 @@
 /**
  * @file feature_extractor.hpp
- * @brief LOAM-style feature extraction for LiDAR point clouds
+ * @brief Feature extraction based on local curvature analysis
  *
  * Extracts geometric features from LiDAR scans:
- * - Edge features: High curvature points (corners, edges of objects)
- * - Planar features: Low curvature points (walls, ground, flat surfaces)
+ * - Edge features: High curvature points (corners, object edges)
+ * - Planar features: Low curvature points (walls, floors)
  *
- * Reference: LOAM (Lidar Odometry and Mapping in Real-time)
- * Zhang, J., & Singh, S. (2014)
+ * Edge features provide strong angular constraints for rotation.
+ * Planar features provide translation constraints.
+ *
+ * Design: Single-pass curvature computation with partial sort
+ * for efficient top-N / bottom-N feature selection.
  */
 
 #ifndef OLIVE_LIDAR_FEATURE_EXTRACTOR_HPP_
 #define OLIVE_LIDAR_FEATURE_EXTRACTOR_HPP_
 
+#include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
-#include <memory>
 #include <vector>
+
+#include "olive/lidar_odom/feature_types.hpp"
 
 namespace olive
 {
 
 /**
- * @brief Configuration for feature extraction
- */
-struct FeatureExtractionConfig
-{
-    // Scan organization (for structured LiDAR like Velodyne)
-    int num_scan_lines = 16;       ///< Number of scan lines (rings)
-    int points_per_line = 1800;    ///< Approximate points per scan line
-
-    // Curvature computation
-    int curvature_region = 5;      ///< Number of neighbors on each side for curvature
-
-    // Feature selection thresholds
-    double edge_threshold = 0.1;   ///< Curvature threshold for edge features
-    double planar_threshold = 0.01; ///< Curvature threshold for planar features
-
-    // Feature count limits (per scan line)
-    int max_edge_features_per_line = 20;    ///< Max sharp edges per line
-    int max_planar_features_per_line = 40;  ///< Max planar points per line
-
-    // Filtering
-    double min_range = 0.5;        ///< Minimum valid range (m)
-    double max_range = 50.0;       ///< Maximum valid range (m)
-
-    // Ground filtering for ground robots
-    bool filter_ground = true;     ///< Remove ground plane points
-    double ground_height_min = -0.3; ///< Min height relative to sensor (m)
-    double ground_height_max = 0.1;  ///< Max height to consider as ground (m)
-    double sensor_height = 0.3;    ///< Sensor height above ground (m)
-
-    // Sector-based selection (ensures spatial distribution)
-    int num_sectors = 6;           ///< Divide scan line into sectors
-};
-
-/**
- * @brief Point with curvature information
- */
-struct PointWithCurvature
-{
-    pcl::PointXYZ point;
-    float curvature;
-    int scan_line;
-    int index_in_line;
-    bool is_valid;
-
-    PointWithCurvature()
-        : curvature(0.0f)
-        , scan_line(0)
-        , index_in_line(0)
-        , is_valid(true)
-    {}
-};
-
-/**
- * @brief Extracted features from a single scan
- */
-struct ExtractedFeatures
-{
-    pcl::PointCloud<pcl::PointXYZ>::Ptr edge_points;      ///< High curvature (sharp) features
-    pcl::PointCloud<pcl::PointXYZ>::Ptr planar_points;    ///< Low curvature (flat) features
-    pcl::PointCloud<pcl::PointXYZ>::Ptr full_cloud;       ///< All valid points (downsampled)
-
-    double timestamp;
-
-    ExtractedFeatures()
-        : edge_points(new pcl::PointCloud<pcl::PointXYZ>())
-        , planar_points(new pcl::PointCloud<pcl::PointXYZ>())
-        , full_cloud(new pcl::PointCloud<pcl::PointXYZ>())
-        , timestamp(0.0)
-    {}
-
-    void clear()
-    {
-        edge_points->clear();
-        planar_points->clear();
-        full_cloud->clear();
-    }
-
-    bool hasFeatures() const
-    {
-        return !edge_points->empty() || !planar_points->empty();
-    }
-
-    size_t totalFeatures() const
-    {
-        return edge_points->size() + planar_points->size();
-    }
-};
-
-/**
- * @brief LOAM-style feature extractor
+ * @brief Curvature-based feature extractor
  *
- * Extracts edge and planar features based on local curvature analysis.
- * The curvature is computed as the variance of neighboring points.
+ * Computes local curvature for each point and classifies as:
+ * - Edge: curvature > edge_threshold
+ * - Planar: curvature < planar_threshold
+ *
+ * Uses partial_sort for efficient feature selection without
+ * sorting the entire point cloud.
  */
 class FeatureExtractor
 {
 public:
-    using PointCloud = pcl::PointCloud<pcl::PointXYZ>;
-    using PointCloudPtr = PointCloud::Ptr;
+    using PointCloud         = pcl::PointCloud<pcl::PointXYZ>;
+    using PointCloudPtr      = PointCloud::Ptr;
     using PointCloudConstPtr = PointCloud::ConstPtr;
 
     /**
@@ -135,19 +55,19 @@ public:
      * @param timestamp Scan timestamp
      * @return Extracted features
      *
-     * For unorganized clouds (e.g., from Gazebo), uses a simpler
-     * approach based on local neighborhood curvature.
+     * ?Check thisFor unorganized clouds (e.g., from Gazebo), uses a simpler
+     * ?approach based on local neighborhood curvature.
      */
     ExtractedFeatures extractUnorganized(const PointCloudConstPtr& cloud, double timestamp);
 
     /**
-     * @brief Extract features from organized point cloud
+     * @brief Extract features from organized point cloud (scan lines)
      * @param cloud Input organized point cloud (rows = scan lines)
      * @param timestamp Scan timestamp
      * @return Extracted features
      *
-     * For organized clouds (e.g., from real Velodyne), uses scan line
-     * structure for more accurate curvature computation.
+     * ?For organized clouds (e.g., from real Velodyne), uses scan line
+     * ?structure for more accurate curvature computation.
      */
     ExtractedFeatures extractOrganized(const PointCloudConstPtr& cloud, double timestamp);
 
@@ -170,26 +90,23 @@ private:
     /**
      * @brief Compute curvature using scan line structure
      */
-    std::vector<std::vector<PointWithCurvature>> computeCurvatureOrganized(
-        const PointCloudConstPtr& cloud);
+    std::vector<std::vector<PointWithCurvature>>
+        computeCurvatureOrganized(const PointCloudConstPtr& cloud);
 
     /**
      * @brief Select features from points sorted by curvature
      */
     void selectFeatures(
         std::vector<PointWithCurvature>& points,
-        PointCloudPtr& edge_cloud,
-        PointCloudPtr& planar_cloud,
-        int max_edges,
-        int max_planars);
+        PointCloudPtr&                   edge_cloud,
+        PointCloudPtr&                   planar_cloud,
+        int                              max_edges,
+        int                              max_planars);
 
     /**
      * @brief Mark neighboring points as invalid (to ensure spatial distribution)
      */
-    void markNeighborsInvalid(
-        std::vector<PointWithCurvature>& points,
-        int center_idx,
-        int radius);
+    void markNeighborsInvalid(std::vector<PointWithCurvature>& points, int center_idx, int radius);
 
     /**
      * @brief Check if point is valid (range, neighbors, etc.)
@@ -202,6 +119,9 @@ private:
     float computeRange(const pcl::PointXYZ& pt) const;
 
     FeatureExtractionConfig config_;
+
+    // KD-tree
+    pcl::KdTreeFLANN<pcl::PointXYZ>::Ptr kdtree_;
 };
 
 }  // namespace olive

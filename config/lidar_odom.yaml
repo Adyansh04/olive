@@ -1,60 +1,57 @@
 # LiDAR Odometry Parameters
-# 
-# FEATURE-BASED REGISTRATION (LOAM-style)
-# Provides better rotation estimation through edge/planar feature matching
+#
+# Two-tier registration for ground robots:
+# - Primary: Feature-based scan-to-map using edge/planar features
+# - Fallback: GICP when features are insufficient
+#
+# All poses constrained to (x, y, yaw) for 2D ground navigation.
 
 lidar_odom_node:
   ros__parameters:
-    # LiDAR type
+    # === Sensor Configuration ===
     is_3d: true
-    
-    # Keyframe thresholds
-    keyframe_distance: 0.3       # meters - triggers local map update
+
+    # === Keyframe Management ===
+    # When to update the local map
+    keyframe_distance: 0.3       # meters
     keyframe_rotation: 0.15      # radians (~8.5 degrees)
-    
-    # Voxel filter leaf size (for GICP fallback)
+
+    # === Point Cloud Filtering ===
     voxel_leaf_size: 0.15        # meters
-    
-    # GICP parameters (fallback registration)
+    min_points_threshold: 50
+
+    # === GICP Fallback Parameters ===
     max_correspondence_dist: 1.0  # meters
-    max_iterations: 15            # iterations
+    max_iterations: 15
     transformation_epsilon: 1.0e-4
     fitness_epsilon: 1.0e-2
-    
-    # Covariance estimation
+
+    # === Covariance Estimation ===
     nominal_pos_std: 0.02         # meters
     nominal_rot_std: 0.02         # radians
     poor_fit_scale: 3.0
-    fitness_threshold: 0.8        # threshold for valid registration
-    
-    # Frame-to-frame parameters
+    fitness_threshold: 0.8
+
+    # === Motion Model ===
     frame_fitness_threshold: 1.0
     max_frame_distance: 1.0       # max expected motion between frames (m)
     velocity_filter_alpha: 0.3
-    min_points_threshold: 50
     degeneracy_threshold: 100.0
-    
-    # ========================================
-    # FEATURE-BASED REGISTRATION (NEW)
-    # ========================================
-    
-    # Enable/disable feature-based registration
+
+    # === Feature Extraction ===
+    # Edge features: high curvature (corners, object edges)
+    # Planar features: low curvature (walls, floors)
     use_feature_registration: true
-    
-    # Feature extraction thresholds (LOAM-style curvature)
-    # Higher edge_threshold = fewer, sharper edges
-    # Lower planar_threshold = fewer, flatter surfaces
     edge_curvature_threshold: 0.1
     planar_curvature_threshold: 0.01
-    
-    # Maximum features per scan
-    max_edge_features: 400        # corners, edges of objects
-    max_planar_features: 800      # walls, ground, flat surfaces
-    
-    # Local map configuration
-    local_map_size: 10            # number of keyframes in sliding window
-    local_map_voxel_size: 0.2     # downsampling for map points
-    
-    # Frame IDs
+    max_edge_features: 400
+    max_planar_features: 800
+
+    # === Local Map ===
+    # Sliding window of keyframes for scan-to-map registration
+    local_map_size: 10
+    local_map_voxel_size: 0.2
+
+    # === Frame IDs ===
     odom_frame_id: "odom"
     lidar_frame_id: "lidar_link"
