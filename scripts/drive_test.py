@@ -83,6 +83,17 @@ class DriveTest(Node):
                 prev = p
             return disp, dyaw, path
 
+        # A marker anchor bends the whole trajectory into the surveyed world
+        # frame mid-run; displacement across that snap is a frame change, not
+        # an odometry error.
+        jump = 0.0
+        for a, b in zip(self.fused, self.fused[1:]):
+            jump = max(jump, math.hypot(b[0] - a[0], b[1] - a[1]))
+        if jump > 1.0:
+            print(f"NOTE: a {jump:.1f} m pose snap occurred mid-run (marker anchoring). "
+                  "Relative metrics below are invalid across the snap - use ate_eval.py "
+                  "for absolute accuracy instead.")
+
         f_disp, f_dyaw, f_path = stats(self.fused, n_fused0)
         g_disp, g_dyaw, g_path = stats(self.gt, n_gt0)
         print(f"samples: fused={len(self.fused)} gt={len(self.gt)}")

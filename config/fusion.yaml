@@ -99,6 +99,11 @@ fusion_node:
     local_map_recent_s: 10.0
     map_edge_leaf_size: 0.1
     map_planar_leaf_size: 0.2
+    # Bounded cloud storage: outside the recent window, one keyframe's clouds
+    # per cloud_voxel_m cell survive (the oldest); the LRU cap is a safety
+    # net. Poses are always kept. 0 disables either bound.
+    cloud_voxel_m: 1.5
+    max_cloud_keyframes: 400
 
     # Debug / RViz visualization (topics under /olive/debug/*).
     # All flags are live-switchable: ros2 param set /fusion_node publish_debug true
@@ -109,7 +114,38 @@ fusion_node:
     debug_scan_features: true    # current scan features, map frame (PointCloud2)
     debug_fiducials: true        # known markers + anchor rays    (MarkerArray)
 
+    # Health monitoring & degradation. Sensor timeouts feed /diagnostics;
+    # a failed or degenerate scan match widens the LiDAR factor instead of
+    # silently keeping centimeter confidence; wheel sigmas widen with the
+    # turning/distance actually covered (slip enters through rotation).
+    diagnostics_period_s: 1.0
+    lidar_timeout_s: 1.0
+    imu_timeout_s: 0.5
+    wheel_timeout_s: 0.5
+    # Degenerate scans: the matcher's internal eigen-projector already
+    # freezes the weak direction of the solution, so blanket inflation is
+    # OFF by default (1.0) — it discards the five good directions too and
+    # measurably hurts. Raise on hardware with real slides/slip. The health
+    # monitor flags DEGRADED either way. Match FAILURE (dead-reckoned
+    # keyframe) is untrusted in every direction and stays heavily inflated.
+    degenerate_sigma_scale: 1.0
+    match_fail_sigma_scale: 50.0
+    wheel_yaw_sigma_per_rad: 2.0
+    wheel_dist_sigma_per_m: 0.1
+    # Catch-all for near-degenerate scenes the eigenvalue threshold misses:
+    # a scan-match translation contradicting the wheels by more than this
+    # (per keyframe interval) loses its authority.
+    wheel_lidar_disagree_m: 0.15
+    # LiDAR-dropout coasting: keep output + TF alive on wheel dead-reckoning.
+    coast_on_dropout: true
+    lidar_dropout_timeout_s: 1.0
+    # Also create wheel-paced keyframes during an outage (lets marker anchors
+    # keep landing); off by default.
+    dropout_keyframes: false
+    prediction_gap_wheel_fallback_s: 0.5
+
     # iSAM2 backend
+    optimize_budget_warn_ms: 50.0
     relinearize_threshold: 0.1
     relinearize_skip: 1
 

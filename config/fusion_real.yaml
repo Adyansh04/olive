@@ -97,6 +97,27 @@ fusion_node:
                                          # the MAP frame (origin at base_link
                                          # start height, not the floor)
 
+    # --- health / degradation ----------------------------------------------
+    diagnostics_period_s: 1.0
+    lidar_timeout_s: 1.0
+    imu_timeout_s: 0.5
+    wheel_timeout_s: 0.5
+    # On real hardware, degenerate scenes and wheel slip are real: give the
+    # degradation responses authority (sim keeps them at 1.0 / disabled).
+    degenerate_sigma_scale: 5.0
+    match_fail_sigma_scale: 50.0
+    wheel_yaw_sigma_per_rad: 2.0
+    wheel_dist_sigma_per_m: 0.1
+    wheel_lidar_disagree_m: 0.3          # per-keyframe distance witness
+    coast_on_dropout: true
+    lidar_dropout_timeout_s: 1.0
+    dropout_keyframes: false
+    prediction_gap_wheel_fallback_s: 0.5
+    # Bounded cloud storage (essential for long missions)
+    cloud_voxel_m: 1.5
+    max_cloud_keyframes: 1000
+    optimize_budget_warn_ms: 80.0
+
     # --- graph ------------------------------------------------------------
     relinearize_threshold: 0.1
     relinearize_skip: 1

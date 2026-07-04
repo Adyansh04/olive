@@ -24,9 +24,11 @@ namespace olive
 struct Keyframe
 {
     gtsam::Pose3 pose;
-    Cloud::Ptr   edge;
-    Cloud::Ptr   planar;
-    double       stamp = 0.0;
+    Cloud::Ptr   edge;    ///< null after cloud eviction (pose is kept)
+    Cloud::Ptr   planar;  ///< null after cloud eviction
+    double       stamp         = 0.0;
+    double       last_selected = 0.0;   ///< last time buildLocalMap used it
+    bool         low_quality   = false; ///< degenerate/coasted; never claims a voxel
 };
 
 /**
@@ -50,12 +52,32 @@ public:
 
     const Keyframe& back() const { return keyframes_.back(); }
 
-    /// Store a new keyframe (clouds are NOT copied; ownership is shared)
+    const Keyframe& at(size_t index) const { return keyframes_[index]; }
+
+    /// True when keyframe @p index still holds its feature clouds
+    bool hasCloud(size_t index) const
+    {
+        return index < keyframes_.size() && keyframes_[index].edge != nullptr;
+    }
+
+    /// Number of keyframes currently holding clouds
+    size_t cloudCount() const { return cloud_bearing_.size(); }
+
+    /**
+     * @brief Store a new keyframe (clouds are NOT copied; ownership is shared)
+     *
+     * Cloud storage is bounded: outside the recent window, at most one
+     * keyframe per cloud_voxel cell keeps its clouds (the OLDEST one — it
+     * maximizes loop-closure time separation and never churns), with an
+     * optional least-recently-used hard cap on top. Evicted keyframes keep
+     * pose/stamp/position (the graph and candidate search need them).
+     */
     void
         add(const gtsam::Pose3& pose,
             const Cloud::Ptr&   edge,
             const Cloud::Ptr&   planar,
-            double              stamp);
+            double              stamp,
+            bool                low_quality = false);
 
     /**
      * @brief True when motion since the last keyframe exceeds the thresholds
@@ -82,8 +104,15 @@ public:
 private:
     KeyframeConfig config_;
 
+    void enforceCloudBudget(double now);
+    int64_t voxelKey(const gtsam::Point3& position) const;
+
     std::vector<Keyframe> keyframes_;
     Cloud::Ptr            keyframe_positions_;  ///< For the radius search
+
+    std::unordered_map<int64_t, size_t> voxel_owner_;   ///< cell -> keyframe index
+    std::unordered_map<size_t, int64_t> claimed_key_;   ///< keyframe -> cell it claimed
+    std::vector<size_t>                 cloud_bearing_; ///< indices still holding clouds
 
     // index -> feature clouds already transformed into the map frame
     std::unordered_map<size_t, std::pair<Cloud::Ptr, Cloud::Ptr>> transformed_cache_;
