@@ -9,7 +9,7 @@ if(NOT CMAKE_CXX_STANDARD)
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  # add_compile_options(-Wall -Wextra -Wpedantic -O3 -march=native -DNDEBUG)
+  add_compile_options(-Wall -Wextra)
 endif()
 
 # Find dependencies
@@ -39,7 +39,6 @@ include_directories(
   ${EIGEN3_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
-  ${GTSAM_INCLUDE_DIR}
 )
 
 # Common dependencies list
@@ -60,22 +59,8 @@ set(COMMON_DEPENDENCIES
   image_transport
 )
 
-# Node: Lidar Odometry 
-add_executable(lidar_odom_node
-  src/nodes/lidar_odom_node.cpp
-  src/lidar_odom/lidar_odometry.cpp
-  src/lidar_odom/feature_extractor.cpp
-  src/lidar_odom/feature_registration.cpp
-  src/lidar_odom/local_map.cpp
-)
-ament_target_dependencies(lidar_odom_node ${COMMON_DEPENDENCIES})
-target_link_libraries(lidar_odom_node ${PCL_LIBRARIES})
-
-# Install targets
-install(TARGETS
-  lidar_odom_node
-  DESTINATION lib/${PROJECT_NAME}
-)
+# Fusion nodes are added here as they are implemented (lio_node, fusion_node,
+# marker_node, vo_node).
 
 # Install launch files
 install(DIRECTORY
@@ -96,8 +81,11 @@ install(DIRECTORY
 )
 
 if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  ament_lint_auto_find_test_dependencies()
+  find_package(ament_cmake_gtest REQUIRED)
+
+  ament_add_gtest(test_covariance_utils test/test_covariance_utils.cpp)
+  ament_target_dependencies(test_covariance_utils geometry_msgs)
+  target_link_libraries(test_covariance_utils gtsam)
 endif()
 
 ament_package()
