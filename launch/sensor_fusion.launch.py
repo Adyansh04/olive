@@ -37,6 +37,7 @@ def launch_fusion_stack(context, *args, **kwargs):
         params = dict(node_params('fusion_node'))
         # Modality toggles flow into the core as parameters.
         params['use_wheel_odom'] = bool(modalities.get('wheel', False))
+        params['use_markers'] = bool(modalities.get('markers', False))
         return Node(
             package='olive',
             executable='fusion_node',
@@ -45,9 +46,19 @@ def launch_fusion_stack(context, *args, **kwargs):
             parameters=[params],
         )
 
-    # modality -> Node factory; populated as the fusion stack lands.
-    # 'lio' starts the fusion core itself (the LiDAR-inertial backbone).
-    node_registry = {'lio': fusion_node}
+    def whycode_detector(_config_file):
+        return Node(
+            package='whycode_vision',
+            executable='whycon',
+            name='whycon',
+            output='screen',
+            parameters=[{'config_file': os.path.join(
+                pkg_olive, 'config', 'whycode_detector_sim.yaml')}],
+        )
+
+    # modality -> Node factory. 'lio' starts the fusion core itself (the
+    # LiDAR-inertial backbone); 'wheel' is an input of the core, not a node.
+    node_registry = {'lio': fusion_node, 'markers': whycode_detector, 'wheel': None}
 
     actions = []
     enabled = [name for name, on in modalities.items() if on]
@@ -55,11 +66,12 @@ def launch_fusion_stack(context, *args, **kwargs):
     print(f"[olive] enabled modalities: {', '.join(enabled) if enabled else 'none'}")
 
     for name in enabled:
-        factory = node_registry.get(name)
-        if factory is None:
+        if name not in node_registry:
             print(f"[olive]   '{name}' enabled but its node is not implemented yet - skipped")
             continue
-        actions.append(factory(config_file))
+        factory = node_registry[name]
+        if factory is not None:
+            actions.append(factory(config_file))
 
     return actions
 

@@ -68,8 +68,25 @@ public:
      */
     void addPlanarPrior(const std::array<double, 3>& sigmas);
 
-    /// Run the incremental update; call once after adding factors for a keyframe
-    void optimize();
+    /**
+     * @brief Anchor the newest keyframe to a known marker (position only)
+     * @param measured_in_camera  Detected marker position, camera frame
+     * @param marker_in_world     Surveyed marker position, map frame
+     * @param base_from_camera    Fixed extrinsic
+     * @param sigma               Isotropic position sigma (m); robustified
+     */
+    void addMarkerAnchor(
+        const gtsam::Point3& measured_in_camera,
+        const gtsam::Point3& marker_in_world,
+        const gtsam::Pose3&  base_from_camera,
+        double               sigma);
+
+    /**
+     * @brief Run the incremental update; call once after adding factors
+     * @return true when a global (anchor) factor was applied this round —
+     *         past keyframe poses may have moved and caches need refreshing
+     */
+    bool optimize();
 
     /// Latest optimized pose of keyframe @p index
     gtsam::Pose3 pose(size_t index) const;
@@ -88,7 +105,8 @@ private:
     gtsam::NonlinearFactorGraph pending_factors_;
     gtsam::Values               pending_values_;
     gtsam::Values               current_estimate_;
-    size_t                      num_keyframes_ = 0;
+    size_t                      num_keyframes_     = 0;
+    bool                        has_global_factor_ = false;
 };
 
 }  // namespace olive

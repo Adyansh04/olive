@@ -12,12 +12,14 @@
 #define OLIVE_FUSION_FUSION_NODE_HPP_
 
 #include <memory>
+#include <unordered_map>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include <rclcpp_lifecycle/lifecycle_publisher.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <tf2_ros/transform_broadcaster.h>
+#include <whycode_vision/msg/why_code_pose_array.hpp>
 
 #include "olive/fusion/feature_extractor.hpp"
 #include "olive/fusion/fusion_types.hpp"
@@ -26,6 +28,7 @@
 #include "olive/fusion/pose_graph.hpp"
 #include "olive/fusion/scan_matcher.hpp"
 #include "olive/fusion/scan_preprocessor.hpp"
+#include "olive/fusion/marker_gate.hpp"
 #include "olive/fusion/wheel_odom_buffer.hpp"
 
 namespace olive
@@ -52,6 +55,7 @@ private:
     void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
     void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg);
     void wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
+    void markerCallback(const whycode_vision::msg::WhyCodePoseArray::SharedPtr msg);
 
     void         bootstrapFirstKeyframe(const FeatureClouds& features);
     gtsam::Pose3 predictPose(double scan_stamp) const;
@@ -69,6 +73,12 @@ private:
     bool         use_wheel_odom_   = true;
     bool         use_planar_prior_ = true;
     bool         publish_map_tf_   = true;
+    bool         use_markers_      = true;
+    std::string  marker_topic_;
+    gtsam::Pose3 base_from_camera_;
+    double       marker_sigma_m_      = 0.10;
+    double       marker_stamp_window_ = 0.25;
+    std::unordered_map<int, gtsam::Point3> known_markers_;
     FactorSigmas lidar_between_sigmas_{};
     FactorSigmas wheel_between_sigmas_{};
     std::array<double, 3> planar_prior_sigmas_{};
@@ -86,6 +96,7 @@ private:
     std::unique_ptr<PoseGraph>        pose_graph_;
     ImuBuffer                         imu_buffer_;
     WheelOdomBuffer                   wheel_buffer_;
+    std::unique_ptr<MarkerGate>       marker_gate_;
 
     // Per-scan state (reused buffers; hot path must not allocate)
     ScanImage     scan_image_;
@@ -99,6 +110,7 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr           points_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr                   imu_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr                 wheel_sub_;
+    rclcpp::Subscription<whycode_vision::msg::WhyCodePoseArray>::SharedPtr   marker_sub_;
     std::unique_ptr<tf2_ros::TransformBroadcaster>                           tf_broadcaster_;
     rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
     nav_msgs::msg::Odometry                                                  odom_msg_;
