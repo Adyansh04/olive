@@ -38,6 +38,7 @@ def launch_fusion_stack(context, *args, **kwargs):
         # Modality toggles flow into the core as parameters.
         params['use_wheel_odom'] = bool(modalities.get('wheel', False))
         params['use_markers'] = bool(modalities.get('markers', False))
+        params['use_vo'] = bool(modalities.get('vo', False))
         return Node(
             package='olive',
             executable='fusion_node',
@@ -56,9 +57,23 @@ def launch_fusion_stack(context, *args, **kwargs):
                 pkg_olive, 'config', 'whycode_detector_sim.yaml')}],
         )
 
+    def vo_node(_config_file):
+        return Node(
+            package='olive',
+            executable='vo_node',
+            name='vo_node',
+            output='screen',
+            parameters=[node_params('vo_node')],
+        )
+
     # modality -> Node factory. 'lio' starts the fusion core itself (the
     # LiDAR-inertial backbone); 'wheel' is an input of the core, not a node.
-    node_registry = {'lio': fusion_node, 'markers': whycode_detector, 'wheel': None}
+    node_registry = {
+        'lio': fusion_node,
+        'markers': whycode_detector,
+        'vo': vo_node,
+        'wheel': None,
+    }
 
     actions = []
     enabled = [name for name, on in modalities.items() if on]

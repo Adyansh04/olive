@@ -82,8 +82,17 @@ add_executable(fusion_node
 ament_target_dependencies(fusion_node ${COMMON_DEPENDENCIES} whycode_vision)
 target_link_libraries(fusion_node ${PCL_LIBRARIES} gtsam gtsam_unstable)
 
+# Node: monocular visual odometry front-end
+add_executable(vo_node
+  src/nodes/vo_node_main.cpp
+  src/vo/visual_odometry_node.cpp
+)
+ament_target_dependencies(vo_node ${COMMON_DEPENDENCIES})
+target_link_libraries(vo_node ${OpenCV_LIBS})
+
 install(TARGETS
   fusion_node
+  vo_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

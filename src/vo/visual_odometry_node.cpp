@@ -1,0 +1,292 @@
+#include "olive/vo/visual_odometry_node.hpp"
+
+#include <cmath>
+#include <cv_bridge/cv_bridge.hpp>
+#include <opencv2/calib3d.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/video/tracking.hpp>
+
+namespace olive
+{
+
+VisualOdometryNode::VisualOdometryNode(const rclcpp::NodeOptions& options)
+  : rclcpp_lifecycle::LifecycleNode("vo_node", options)
+{
+    declare_parameter("autostart", true);
+    declare_parameter("image_topic", "/camera/image_raw");
+    declare_parameter("camera_info_topic", "/camera/camera_info");
+    declare_parameter("wheel_odom_topic", "/odom");
+    declare_parameter("odom_topic", "/olive/visual_odom");
+    declare_parameter("odom_frame", "vo_odom");
+    declare_parameter("base_frame", "base_link");
+    declare_parameter("max_features", 300);
+    declare_parameter("min_tracked_features", 60);
+    declare_parameter("min_parallax_px", 12.0);
+    declare_parameter("ransac_threshold_px", 1.0);
+    declare_parameter("min_wheel_motion_m", 0.03);
+
+    if (get_parameter("autostart").as_bool())
+    {
+        autostart_timer_ = create_wall_timer(std::chrono::milliseconds(200), [this]() {
+            autostart_timer_->cancel();
+            configure();
+            activate();
+        });
+    }
+}
+
+VisualOdometryNode::CallbackReturn VisualOdometryNode::on_configure(const rclcpp_lifecycle::State&)
+{
+    image_topic_       = get_parameter("image_topic").as_string();
+    camera_info_topic_ = get_parameter("camera_info_topic").as_string();
+    wheel_odom_topic_  = get_parameter("wheel_odom_topic").as_string();
+    odom_topic_        = get_parameter("odom_topic").as_string();
+    odom_frame_        = get_parameter("odom_frame").as_string();
+    base_frame_        = get_parameter("base_frame").as_string();
+    max_features_      = static_cast<int>(get_parameter("max_features").as_int());
+    min_tracked_       = static_cast<int>(get_parameter("min_tracked_features").as_int());
+    min_parallax_px_   = get_parameter("min_parallax_px").as_double();
+    ransac_threshold_  = get_parameter("ransac_threshold_px").as_double();
+    min_wheel_motion_  = get_parameter("min_wheel_motion_m").as_double();
+
+    pose_x_ = pose_y_ = pose_yaw_ = 0.0;
+    keyframe_stamp_               = -1.0;
+    have_intrinsics_              = false;
+
+    odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(odom_topic_, rclcpp::QoS(10));
+    odom_msg_.header.frame_id = odom_frame_;
+    odom_msg_.child_frame_id  = base_frame_;
+
+    RCLCPP_INFO(get_logger(), "Configured (%s -> %s)", image_topic_.c_str(), odom_topic_.c_str());
+    return CallbackReturn::SUCCESS;
+}
+
+VisualOdometryNode::CallbackReturn
+    VisualOdometryNode::on_activate(const rclcpp_lifecycle::State& state)
+{
+    LifecycleNode::on_activate(state);
+
+    image_sub_ = create_subscription<sensor_msgs::msg::Image>(
+        image_topic_,
+        rclcpp::SensorDataQoS().keep_last(2),
+        [this](sensor_msgs::msg::Image::SharedPtr msg) { imageCallback(msg); });
+    camera_info_sub_ = create_subscription<sensor_msgs::msg::CameraInfo>(
+        camera_info_topic_,
+        rclcpp::QoS(5),
+        [this](sensor_msgs::msg::CameraInfo::SharedPtr msg) { cameraInfoCallback(msg); });
+    wheel_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+        wheel_odom_topic_,
+        rclcpp::SensorDataQoS().keep_last(50),
+        [this](nav_msgs::msg::Odometry::SharedPtr msg) { wheelOdomCallback(msg); });
+    return CallbackReturn::SUCCESS;
+}
+
+VisualOdometryNode::CallbackReturn
+    VisualOdometryNode::on_deactivate(const rclcpp_lifecycle::State& state)
+{
+    image_sub_.reset();
+    camera_info_sub_.reset();
+    wheel_sub_.reset();
+    LifecycleNode::on_deactivate(state);
+    return CallbackReturn::SUCCESS;
+}
+
+VisualOdometryNode::CallbackReturn VisualOdometryNode::on_cleanup(const rclcpp_lifecycle::State&)
+{
+    image_sub_.reset();
+    camera_info_sub_.reset();
+    wheel_sub_.reset();
+    odom_pub_.reset();
+    return CallbackReturn::SUCCESS;
+}
+
+void VisualOdometryNode::cameraInfoCallback(const sensor_msgs::msg::CameraInfo::SharedPtr msg)
+{
+    focal_           = msg->k[0];
+    principal_point_ = { msg->k[2], msg->k[5] };
+    have_intrinsics_ = true;
+    camera_info_sub_.reset();  // intrinsics are static in this system
+}
+
+void VisualOdometryNode::wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
+{
+    const double stamp =
+        static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec;
+    std::lock_guard<std::mutex> lock(wheel_mutex_);
+    wheel_samples_.push_back({ stamp, msg->pose.pose.position.x, msg->pose.pose.position.y });
+    while (!wheel_samples_.empty() && wheel_samples_.front()[0] < stamp - 30.0)
+        wheel_samples_.pop_front();
+}
+
+std::optional<double> VisualOdometryNode::wheelDistance(double t0, double t1) const
+{
+    std::lock_guard<std::mutex> lock(wheel_mutex_);
+    if (wheel_samples_.size() < 2)
+        return std::nullopt;
+
+    auto nearest = [this](double t) -> std::optional<std::array<double, 3>> {
+        const auto it = std::min_element(
+            wheel_samples_.begin(),
+            wheel_samples_.end(),
+            [t](const auto& a, const auto& b) { return std::abs(a[0] - t) < std::abs(b[0] - t); });
+        if (std::abs((*it)[0] - t) > 0.15)
+            return std::nullopt;
+        return *it;
+    };
+
+    const auto a = nearest(t0);
+    const auto b = nearest(t1);
+    if (!a || !b)
+        return std::nullopt;
+    return std::hypot((*b)[1] - (*a)[1], (*b)[2] - (*a)[2]);
+}
+
+void VisualOdometryNode::adoptKeyframe(const cv::Mat& gray, double stamp)
+{
+    keyframe_features_.clear();
+    cv::goodFeaturesToTrack(gray, keyframe_features_, max_features_, 0.01, 8.0);
+    keyframe_gray_  = gray.clone();
+    keyframe_stamp_ = stamp;
+}
+
+void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
+{
+    if (!have_intrinsics_)
+        return;
+
+    const double stamp =
+        static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec;
+
+    cv::Mat gray;
+    cv::cvtColor(cv_bridge::toCvShare(msg, "rgb8")->image, gray, cv::COLOR_RGB2GRAY);
+
+    if (keyframe_stamp_ < 0.0 || static_cast<int>(keyframe_features_.size()) < min_tracked_)
+    {
+        adoptKeyframe(gray, stamp);
+        return;
+    }
+
+    // Track keyframe features into the current image.
+    std::vector<cv::Point2f> tracked;
+    std::vector<uchar>       status;
+    std::vector<float>       err;
+    cv::calcOpticalFlowPyrLK(keyframe_gray_, gray, keyframe_features_, tracked, status, err);
+
+    std::vector<cv::Point2f> p0;
+    std::vector<cv::Point2f> p1;
+    double                   parallax = 0.0;
+    for (size_t i = 0; i < status.size(); ++i)
+    {
+        if (status[i] == 0)
+            continue;
+        p0.push_back(keyframe_features_[i]);
+        p1.push_back(tracked[i]);
+        parallax += cv::norm(tracked[i] - keyframe_features_[i]);
+    }
+
+    if (static_cast<int>(p0.size()) < min_tracked_)
+    {
+        adoptKeyframe(gray, stamp);
+        return;
+    }
+    parallax /= static_cast<double>(p0.size());
+    if (parallax < min_parallax_px_)
+        return;  // not enough baseline yet
+
+    const auto wheel_motion = wheelDistance(keyframe_stamp_, stamp);
+    if (!wheel_motion)
+        return;  // no scale reference yet; keep accumulating baseline
+
+    if (*wheel_motion < min_wheel_motion_)
+    {
+        // Large image flow with no wheel translation = in-place rotation:
+        // the essential-matrix translation is meaningless, recover yaw only.
+        // Small flow with sub-gate wheel motion is a slow forward crawl —
+        // keep the keyframe and wait for more baseline instead.
+        if (parallax < 4.0 * min_parallax_px_)
+            return;
+
+        cv::Mat       inliers;
+        const cv::Mat essential = cv::findEssentialMat(
+            p0,
+            p1,
+            focal_,
+            principal_point_,
+            cv::RANSAC,
+            0.999,
+            ransac_threshold_,
+            inliers);
+        if (essential.empty())
+            return;
+        cv::Mat rotation;
+        cv::Mat translation;
+        cv::recoverPose(essential, p0, p1, rotation, translation, focal_, principal_point_, inliers);
+        // Optical frame: yaw of the body = rotation about the camera y axis.
+        pose_yaw_ += std::atan2(rotation.at<double>(0, 2), rotation.at<double>(2, 2));
+        adoptKeyframe(gray, stamp);
+        publishOdometry(stamp);
+        return;
+    }
+
+    cv::Mat       inliers;
+    const cv::Mat essential = cv::findEssentialMat(
+        p0,
+        p1,
+        focal_,
+        principal_point_,
+        cv::RANSAC,
+        0.999,
+        ransac_threshold_,
+        inliers);
+    if (essential.empty())
+        return;
+
+    cv::Mat   rotation;
+    cv::Mat   translation;
+    const int inlier_count =
+        cv::recoverPose(essential, p0, p1, rotation, translation, focal_, principal_point_, inliers);
+    if (inlier_count < min_tracked_ / 2)
+    {
+        adoptKeyframe(gray, stamp);
+        return;
+    }
+
+    // Planar reduction, optical convention (x right, y down, z forward):
+    // body yaw is the rotation about the camera y axis; body-frame forward /
+    // left displacement come from the z / -x components of the translation
+    // direction, scaled by the wheel-measured distance.
+    const double delta_yaw = std::atan2(rotation.at<double>(0, 2), rotation.at<double>(2, 2));
+    const double tx        = translation.at<double>(0);
+    const double tz        = translation.at<double>(2);
+    const double norm_xz   = std::hypot(tx, tz);
+    if (norm_xz < 1e-6)
+        return;
+
+    const double forward = *wheel_motion * (tz / norm_xz);
+    const double left    = *wheel_motion * (-tx / norm_xz);
+
+    // recoverPose yields the second-camera-from-first transform; the camera
+    // (= body) motion in the first frame is the inverse translation.
+    pose_x_ += std::cos(pose_yaw_) * forward - std::sin(pose_yaw_) * left;
+    pose_y_ += std::sin(pose_yaw_) * forward + std::cos(pose_yaw_) * left;
+    pose_yaw_ += delta_yaw;
+
+    adoptKeyframe(gray, stamp);
+    publishOdometry(stamp);
+}
+
+void VisualOdometryNode::publishOdometry(double stamp)
+{
+    if (!odom_pub_->is_activated())
+        return;
+
+    odom_msg_.header.stamp            = rclcpp::Time(static_cast<int64_t>(stamp * 1e9));
+    odom_msg_.pose.pose.position.x    = pose_x_;
+    odom_msg_.pose.pose.position.y    = pose_y_;
+    odom_msg_.pose.pose.position.z    = 0.0;
+    odom_msg_.pose.pose.orientation.w = std::cos(pose_yaw_ / 2.0);
+    odom_msg_.pose.pose.orientation.z = std::sin(pose_yaw_ / 2.0);
+    odom_pub_->publish(odom_msg_);
+}
+
+}  // namespace olive
