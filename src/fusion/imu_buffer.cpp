@@ -1,19 +1,58 @@
 #include "olive/fusion/imu_buffer.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace olive
 {
+
+namespace
+{
+
+Eigen::Quaterniond rotationFromRate(const Eigen::Vector3d& rate, double dt)
+{
+    const double norm = rate.norm();
+    if (norm < 1e-12 || dt <= 0.0)
+        return Eigen::Quaterniond::Identity();
+    return Eigen::Quaterniond(Eigen::AngleAxisd(norm * dt, rate / norm));
+}
+
+}  // namespace
 
 ImuBuffer::ImuBuffer(double history_seconds)
   : history_seconds_(history_seconds)
 {}
 
+void ImuBuffer::setMountingRotation(const Eigen::Quaterniond& base_from_imu)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    base_from_imu_ = base_from_imu.normalized();
+}
+
+void ImuBuffer::setGyroBias(const Eigen::Vector3d& bias)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    gyro_bias_ = bias;
+}
+
+Eigen::Vector3d ImuBuffer::gyroBias() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return gyro_bias_;
+}
+
 void ImuBuffer::push(const ImuData& sample)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    samples_.push_back(sample);
-    const double cutoff = sample.timestamp - history_seconds_;
+
+    // Store in BASE axes so every consumer (prediction, deskew, stationarity
+    // checks) sees body rates regardless of how the IMU is mounted.
+    ImuData rotated             = sample;
+    rotated.angular_velocity    = base_from_imu_ * sample.angular_velocity;
+    rotated.linear_acceleration = base_from_imu_ * sample.linear_acceleration;
+
+    samples_.push_back(rotated);
+    const double cutoff = rotated.timestamp - history_seconds_;
     while (!samples_.empty() && samples_.front().timestamp < cutoff)
         samples_.pop_front();
 }
@@ -28,31 +67,73 @@ Eigen::Quaterniond ImuBuffer::relativeRotation(double t0, double t1) const
 
     double          previous_time = t0;
     Eigen::Vector3d last_rate     = Eigen::Vector3d::Zero();
+    bool            any_sample    = false;
     for (const ImuData& sample : samples_)
     {
         if (sample.timestamp <= t0)
             continue;
         if (sample.timestamp > t1)
             break;
-        last_rate = sample.angular_velocity;
+        last_rate  = sample.angular_velocity - gyro_bias_;
+        any_sample = true;
 
-        const double dt = sample.timestamp - previous_time;
-        rotation        = rotation * Eigen::Quaterniond(Eigen::AngleAxisd(
-                                  sample.angular_velocity.norm() * dt,
-                                  sample.angular_velocity.norm() > 1e-12 ?
-                                             sample.angular_velocity.normalized() :
-                                             Eigen::Vector3d::UnitZ()));
-        previous_time   = sample.timestamp;
+        rotation      = rotation * rotationFromRate(last_rate, sample.timestamp - previous_time);
+        previous_time = sample.timestamp;
     }
+
     // Samples may not have arrived for the very end of the window yet;
     // extrapolate the remainder with the last observed rate.
     const double tail = t1 - previous_time;
-    if (tail > 1e-4 && last_rate.norm() > 1e-12)
-        rotation = rotation *
-                   Eigen::Quaterniond(Eigen::AngleAxisd(last_rate.norm() * tail, last_rate.normalized()));
+    if (any_sample && tail > 1e-4)
+        rotation = rotation * rotationFromRate(last_rate, tail);
 
     rotation.normalize();
     return rotation;
+}
+
+Eigen::Vector3d ImuBuffer::rateNear(double time) const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (samples_.empty())
+        return Eigen::Vector3d::Zero();
+
+    const auto it = std::min_element(
+        samples_.begin(),
+        samples_.end(),
+        [time](const ImuData& a, const ImuData& b) {
+            return std::abs(a.timestamp - time) < std::abs(b.timestamp - time);
+        });
+    return it->angular_velocity - gyro_bias_;
+}
+
+ImuBuffer::WindowStats ImuBuffer::windowStats(double t0, double t1) const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    WindowStats stats;
+    for (const ImuData& sample : samples_)
+    {
+        if (sample.timestamp < t0 || sample.timestamp > t1)
+            continue;
+        stats.gyro_mean += sample.angular_velocity;
+        stats.accel_mean += sample.linear_acceleration;
+        ++stats.count;
+    }
+    if (stats.count == 0)
+        return stats;
+    stats.gyro_mean /= static_cast<double>(stats.count);
+    stats.accel_mean /= static_cast<double>(stats.count);
+
+    for (const ImuData& sample : samples_)
+    {
+        if (sample.timestamp < t0 || sample.timestamp > t1)
+            continue;
+        stats.gyro_deviation =
+            std::max(stats.gyro_deviation, (sample.angular_velocity - stats.gyro_mean).norm());
+        stats.accel_deviation =
+            std::max(stats.accel_deviation, (sample.linear_acceleration - stats.accel_mean).norm());
+    }
+    return stats;
 }
 
 bool ImuBuffer::hasData() const

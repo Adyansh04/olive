@@ -37,6 +37,18 @@ fusion_node:
     # Fixed base<-lidar extrinsic (from the URDF; TF-driven on real hardware later)
     lidar_translation: [0.0, 0.0, 0.145]
     lidar_rpy: [0.0, 0.0, 0.0]
+    # IMU mounting rotation (base <- imu). Real IMUs are rarely axis-aligned.
+    imu_rpy: [0.0, 0.0, 0.0]
+
+    # IMU startup initialization: the robot should be stationary for this
+    # window so the gyro bias can be estimated; scans are held until then.
+    # On timeout the node proceeds with zero bias (and warns).
+    imu_init_duration_s: 1.5
+    imu_init_max_wait_s: 10.0
+    stationary_gyro_thresh_rad_s: 0.02
+    stationary_wheel_thresh_m: 0.005
+    # Slowly track gyro bias drift during stationary periods (real robots).
+    gyro_bias_reestimate: false
 
     # Scan preprocessing
     min_range: 0.3
