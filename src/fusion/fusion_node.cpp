@@ -1,6 +1,7 @@
 #include "olive/fusion/fusion_node.hpp"
 
 #include <pcl/common/transforms.h>
+#include <pcl_conversions/pcl_conversions.h>
 
 #include "olive/common/covariance_utils.hpp"
 #include "olive/common/gtsam_conversions.hpp"
@@ -12,6 +13,29 @@ FusionNode::FusionNode(const rclcpp::NodeOptions& options)
   : rclcpp_lifecycle::LifecycleNode("fusion_node", options)
 {
     declareParameters();
+
+    // Debug toggles react to `ros2 param set` at runtime — no restart needed.
+    param_callback_ =
+        add_on_set_parameters_callback([this](const std::vector<rclcpp::Parameter>& params) {
+            for (const rclcpp::Parameter& p : params)
+            {
+                if (p.get_name() == "publish_debug")
+                    debug_enabled_ = p.as_bool();
+                else if (p.get_name() == "debug_path")
+                    debug_path_ = p.as_bool();
+                else if (p.get_name() == "debug_keyframes")
+                    debug_keyframes_ = p.as_bool();
+                else if (p.get_name() == "debug_local_map")
+                    debug_local_map_ = p.as_bool();
+                else if (p.get_name() == "debug_scan_features")
+                    debug_scan_features_ = p.as_bool();
+                else if (p.get_name() == "debug_fiducials")
+                    debug_fiducials_ = p.as_bool();
+            }
+            rcl_interfaces::msg::SetParametersResult result;
+            result.successful = true;
+            return result;
+        });
 
     // Self-managed bring-up: launch files stay free of lifecycle event
     // wiring, while autostart:=false keeps manual control available.
@@ -38,14 +62,12 @@ void FusionNode::declareParameters()
     declare_parameter("use_wheel_odom", true);
     declare_parameter("use_planar_prior", true);
     declare_parameter("publish_map_tf", true);
-    declare_parameter(
-        "wheel_between_sigmas", std::vector<double>{ 0.03, 0.03, 0.5, 0.5, 0.5, 0.2 });
+    declare_parameter("wheel_between_sigmas", std::vector<double>{ 0.03, 0.03, 0.5, 0.5, 0.5, 0.2 });
     declare_parameter("planar_prior_sigmas", std::vector<double>{ 0.02, 0.009, 0.009 });
 
     declare_parameter("use_vo", false);
     declare_parameter("vo_topic", "/olive/visual_odom");
-    declare_parameter(
-        "vo_between_sigmas", std::vector<double>{ 0.1, 0.1, 1.0, 1.0, 1.0, 0.1 });
+    declare_parameter("vo_between_sigmas", std::vector<double>{ 0.1, 0.1, 1.0, 1.0, 1.0, 0.1 });
     declare_parameter("use_markers", true);
     declare_parameter("marker_topic", "/whycode/poses");
     declare_parameter("camera_translation", std::vector<double>{ 0.2, 0.0, 0.06 });
@@ -80,6 +102,13 @@ void FusionNode::declareParameters()
     declare_parameter("map_edge_leaf_size", 0.2);
     declare_parameter("map_planar_leaf_size", 0.4);
 
+    declare_parameter("publish_debug", false);
+    declare_parameter("debug_path", true);
+    declare_parameter("debug_keyframes", true);
+    declare_parameter("debug_local_map", true);
+    declare_parameter("debug_scan_features", true);
+    declare_parameter("debug_fiducials", true);
+
     declare_parameter("relinearize_threshold", 0.1);
     declare_parameter("relinearize_skip", 1);
     declare_parameter(
@@ -108,10 +137,11 @@ void FusionNode::loadConfiguration()
     for (size_t i = 0; i < 3 && i < planar_sigmas.size(); ++i)
         planar_prior_sigmas_[i] = planar_sigmas[i];
 
-    use_vo_   = get_parameter("use_vo").as_bool();
-    vo_topic_ = get_parameter("vo_topic").as_string();
+    use_vo_              = get_parameter("use_vo").as_bool();
+    vo_topic_            = get_parameter("vo_topic").as_string();
     const auto vo_sigmas = get_parameter("vo_between_sigmas").as_double_array();
-    for (size_t i = 0; i < 6 && i < vo_sigmas.size(); ++i) vo_between_sigmas_[i] = vo_sigmas[i];
+    for (size_t i = 0; i < 6 && i < vo_sigmas.size(); ++i)
+        vo_between_sigmas_[i] = vo_sigmas[i];
 
     use_markers_  = get_parameter("use_markers").as_bool();
     marker_topic_ = get_parameter("marker_topic").as_string();
@@ -126,8 +156,8 @@ void FusionNode::loadConfiguration()
     marker_stamp_window_ = get_parameter("marker_stamp_window_s").as_double();
 
     MarkerGateConfig gate_config;
-    gate_config.min_range        = get_parameter("marker_min_range_m").as_double();
-    gate_config.max_range        = get_parameter("marker_max_range_m").as_double();
+    gate_config.min_range = get_parameter("marker_min_range_m").as_double();
+    gate_config.max_range = get_parameter("marker_max_range_m").as_double();
     gate_config.min_track_frames =
         static_cast<int>(get_parameter("marker_min_track_frames").as_int());
 
@@ -138,7 +168,8 @@ void FusionNode::loadConfiguration()
     {
         const int id = static_cast<int>(ids[i]);
         known_markers_.emplace(
-            id, gtsam::Point3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]));
+            id,
+            gtsam::Point3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]));
         gate_config.known_ids.insert(id);
     }
     marker_gate_ = std::make_unique<MarkerGate>(gate_config);
@@ -179,6 +210,13 @@ void FusionNode::loadConfiguration()
     keyframe_config_.planar_leaf_size =
         static_cast<float>(get_parameter("map_planar_leaf_size").as_double());
 
+    debug_enabled_       = get_parameter("publish_debug").as_bool();
+    debug_path_          = get_parameter("debug_path").as_bool();
+    debug_keyframes_     = get_parameter("debug_keyframes").as_bool();
+    debug_local_map_     = get_parameter("debug_local_map").as_bool();
+    debug_scan_features_ = get_parameter("debug_scan_features").as_bool();
+    debug_fiducials_     = get_parameter("debug_fiducials").as_bool();
+
     const auto sigmas = get_parameter("lidar_between_sigmas").as_double_array();
     for (size_t i = 0; i < 6 && i < sigmas.size(); ++i)
         lidar_between_sigmas_[i] = sigmas[i];
@@ -200,8 +238,31 @@ FusionNode::CallbackReturn FusionNode::on_configure(const rclcpp_lifecycle::Stat
     last_increment_  = gtsam::Pose3();
     last_scan_stamp_ = -1.0;
 
-    odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(odom_topic_, rclcpp::QoS(10));
+    odom_pub_       = create_publisher<nav_msgs::msg::Odometry>(odom_topic_, rclcpp::QoS(10));
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+
+    // Debug topics: keyframe-rate ones are transient-local so a late RViz
+    // still receives the latest state; scan-rate ones stay volatile.
+    const rclcpp::QoS latched = rclcpp::QoS(1).transient_local();
+    debug_path_pub_           = create_publisher<nav_msgs::msg::Path>("/olive/debug/path", latched);
+    debug_keyframes_pub_ =
+        create_publisher<geometry_msgs::msg::PoseArray>("/olive/debug/keyframes", latched);
+    debug_map_edges_pub_ =
+        create_publisher<sensor_msgs::msg::PointCloud2>("/olive/debug/map_edges", latched);
+    debug_map_planars_pub_ =
+        create_publisher<sensor_msgs::msg::PointCloud2>("/olive/debug/map_planars", latched);
+    debug_scan_edges_pub_ =
+        create_publisher<sensor_msgs::msg::PointCloud2>("/olive/debug/scan_edges", rclcpp::QoS(1));
+    debug_scan_planars_pub_ =
+        create_publisher<sensor_msgs::msg::PointCloud2>("/olive/debug/scan_planars", rclcpp::QoS(1));
+    debug_fiducials_pub_ =
+        create_publisher<visualization_msgs::msg::MarkerArray>("/olive/debug/fiducials", latched);
+
+    debug_path_msg_.poses.clear();
+    debug_path_msg_.header.frame_id = map_frame_;
+    anchor_event_times_.clear();
+    last_edge_map_.reset();
+    last_planar_map_.reset();
 
     // The fused estimate lives in the map frame; the odom frame stays owned
     // by the wheel odometry source (REP-105).
@@ -238,8 +299,8 @@ FusionNode::CallbackReturn FusionNode::on_activate(const rclcpp_lifecycle::State
             vo_topic_,
             rclcpp::QoS(10),
             [this](nav_msgs::msg::Odometry::SharedPtr msg) {
-                const double stamp = static_cast<double>(msg->header.stamp.sec) +
-                                     1e-9 * msg->header.stamp.nanosec;
+                const double stamp =
+                    static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec;
                 vo_buffer_.push(stamp, gtsam_conversions::toGtsamPose(msg->pose.pose));
             });
     if (use_markers_)
@@ -272,6 +333,13 @@ FusionNode::CallbackReturn FusionNode::on_cleanup(const rclcpp_lifecycle::State&
     vo_sub_.reset();
     odom_pub_.reset();
     tf_broadcaster_.reset();
+    debug_path_pub_.reset();
+    debug_keyframes_pub_.reset();
+    debug_map_edges_pub_.reset();
+    debug_map_planars_pub_.reset();
+    debug_scan_edges_pub_.reset();
+    debug_scan_planars_pub_.reset();
+    debug_fiducials_pub_.reset();
     preprocessor_.reset();
     feature_extractor_.reset();
     scan_matcher_.reset();
@@ -366,6 +434,8 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
     Cloud::Ptr planar_map;
     keyframe_map_->buildLocalMap(guess.translation(), features_.stamp, edge_map, planar_map);
     scan_matcher_->setTarget(edge_map, planar_map);
+    last_edge_map_   = edge_map;
+    last_planar_map_ = planar_map;
 
     MatcherPose matcher_pose =
         MatcherPose::fromAffine(Eigen::Affine3f(guess.matrix().cast<float>()));
@@ -406,8 +476,7 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
 
         if (use_wheel_odom_)
         {
-            const auto wheel_relative =
-                wheel_buffer_.relativePose(previous_stamp, features_.stamp);
+            const auto wheel_relative = wheel_buffer_.relativePose(previous_stamp, features_.stamp);
             if (wheel_relative)
                 pose_graph_->addOdometryFactor(*wheel_relative, wheel_between_sigmas_);
         }
@@ -433,6 +502,7 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
                     known_markers_.at(obs.marker_id),
                     base_from_camera_,
                     marker_sigma_m_);
+                anchor_event_times_[obs.marker_id] = features_.stamp;
                 ++anchors;
             }
         }
@@ -449,7 +519,8 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
             // A marker anchor bent the past trajectory: refresh every stored
             // keyframe pose and drop the transformed-cloud cache.
             const auto poses = pose_graph_->allPoses();
-            for (size_t i = 0; i < poses.size(); ++i) keyframe_map_->updatePose(i, poses[i]);
+            for (size_t i = 0; i < poses.size(); ++i)
+                keyframe_map_->updatePose(i, poses[i]);
             keyframe_map_->invalidateCache();
             RCLCPP_INFO(
                 get_logger(),
@@ -459,9 +530,11 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
         }
 
         last_scan_pose_ = optimized;
+        publishKeyframeDebug(corrected, features_.stamp);
     }
 
     publishOdometry(last_scan_pose_, features_.stamp);
+    publishScanDebug(features_.stamp);
 
     const double pipeline_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pipeline_start)
@@ -483,6 +556,182 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
         static_cast<double>(scan_matcher_->constraintEigenvalues()(1)),
         static_cast<double>(scan_matcher_->constraintEigenvalues()(2)),
         pipeline_ms);
+}
+
+namespace
+{
+
+void toCloudMsg(
+    const Cloud&                   cloud,
+    const std::string&             frame,
+    const rclcpp::Time&            stamp,
+    sensor_msgs::msg::PointCloud2& msg)
+{
+    pcl::toROSMsg(cloud, msg);
+    msg.header.frame_id = frame;
+    msg.header.stamp    = stamp;
+}
+
+}  // namespace
+
+void FusionNode::publishKeyframeDebug(bool trajectory_corrected, double stamp)
+{
+    if (!debug_enabled_)
+        return;
+    const rclcpp::Time ros_stamp(static_cast<int64_t>(stamp * 1e9));
+
+    if (debug_path_)
+    {
+        if (trajectory_corrected)
+        {
+            // Past poses moved: rebuild the whole path so it stays honest.
+            debug_path_msg_.poses.clear();
+            for (const gtsam::Pose3& pose : pose_graph_->allPoses())
+            {
+                geometry_msgs::msg::PoseStamped ps;
+                ps.header.frame_id = map_frame_;
+                ps.pose            = gtsam_conversions::toRosPose(pose);
+                debug_path_msg_.poses.push_back(ps);
+            }
+        }
+        else
+        {
+            geometry_msgs::msg::PoseStamped ps;
+            ps.header.frame_id = map_frame_;
+            ps.header.stamp    = ros_stamp;
+            ps.pose            = gtsam_conversions::toRosPose(pose_graph_->latestPose());
+            debug_path_msg_.poses.push_back(ps);
+        }
+        debug_path_msg_.header.stamp = ros_stamp;
+        debug_path_pub_->publish(debug_path_msg_);
+    }
+
+    if (debug_keyframes_)
+    {
+        geometry_msgs::msg::PoseArray array;
+        array.header.frame_id = map_frame_;
+        array.header.stamp    = ros_stamp;
+        for (const gtsam::Pose3& pose : pose_graph_->allPoses())
+            array.poses.push_back(gtsam_conversions::toRosPose(pose));
+        debug_keyframes_pub_->publish(array);
+    }
+
+    if (debug_local_map_ && last_edge_map_ && last_planar_map_)
+    {
+        sensor_msgs::msg::PointCloud2 msg;
+        toCloudMsg(*last_edge_map_, map_frame_, ros_stamp, msg);
+        debug_map_edges_pub_->publish(msg);
+        toCloudMsg(*last_planar_map_, map_frame_, ros_stamp, msg);
+        debug_map_planars_pub_->publish(msg);
+    }
+
+    publishFiducialDebug(stamp);
+}
+
+void FusionNode::publishScanDebug(double stamp)
+{
+    if (!debug_enabled_ || !debug_scan_features_)
+        return;
+    const bool want_edges   = debug_scan_edges_pub_->get_subscription_count() > 0;
+    const bool want_planars = debug_scan_planars_pub_->get_subscription_count() > 0;
+    if (!want_edges && !want_planars)
+        return;
+
+    const rclcpp::Time    ros_stamp(static_cast<int64_t>(stamp * 1e9));
+    const Eigen::Affine3f transform(last_scan_pose_.matrix().cast<float>());
+
+    sensor_msgs::msg::PointCloud2 msg;
+    if (want_edges)
+    {
+        pcl::transformPointCloud(*features_.edge, debug_scan_cloud_, transform);
+        toCloudMsg(debug_scan_cloud_, map_frame_, ros_stamp, msg);
+        debug_scan_edges_pub_->publish(msg);
+    }
+    if (want_planars)
+    {
+        pcl::transformPointCloud(*features_.planar, debug_scan_cloud_, transform);
+        toCloudMsg(debug_scan_cloud_, map_frame_, ros_stamp, msg);
+        debug_scan_planars_pub_->publish(msg);
+    }
+}
+
+void FusionNode::publishFiducialDebug(double stamp)
+{
+    if (!debug_fiducials_)
+        return;
+    constexpr double   RECENT = 3.0;  // anchor highlight duration (s)
+    const rclcpp::Time ros_stamp(static_cast<int64_t>(stamp * 1e9));
+
+    visualization_msgs::msg::MarkerArray array;
+    for (const auto& [id, position] : known_markers_)
+    {
+        const auto event  = anchor_event_times_.find(id);
+        const bool seen   = event != anchor_event_times_.end();
+        const bool recent = seen && (stamp - event->second) < RECENT;
+
+        visualization_msgs::msg::Marker sphere;
+        sphere.header.frame_id    = map_frame_;
+        sphere.header.stamp       = ros_stamp;
+        sphere.ns                 = "fiducials";
+        sphere.id                 = id;
+        sphere.type               = visualization_msgs::msg::Marker::SPHERE;
+        sphere.action             = visualization_msgs::msg::Marker::ADD;
+        sphere.pose.position.x    = position.x();
+        sphere.pose.position.y    = position.y();
+        sphere.pose.position.z    = position.z();
+        sphere.pose.orientation.w = 1.0;
+        sphere.scale.x = sphere.scale.y = sphere.scale.z = 0.3;
+        // gray = never anchored, green = anchoring now, blue = anchored before
+        sphere.color.r = recent ? 0.1F : (seen ? 0.1F : 0.5F);
+        sphere.color.g = recent ? 0.9F : (seen ? 0.4F : 0.5F);
+        sphere.color.b = recent ? 0.1F : (seen ? 0.9F : 0.5F);
+        sphere.color.a = 0.9F;
+        array.markers.push_back(sphere);
+
+        visualization_msgs::msg::Marker label = sphere;
+        label.ns                              = "fiducial_labels";
+        label.type                            = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+        label.text                            = "id " + std::to_string(id);
+        label.pose.position.z += 0.35;
+        label.scale.z = 0.25;
+        label.color.r = label.color.g = label.color.b = 1.0F;
+        array.markers.push_back(label);
+
+        if (recent)
+        {
+            // Ray from the robot to the marker that is anchoring it right now.
+            visualization_msgs::msg::Marker ray = sphere;
+            ray.ns                              = "anchor_rays";
+            ray.type                            = visualization_msgs::msg::Marker::LINE_LIST;
+            ray.scale.x                         = 0.03;
+            ray.pose                            = geometry_msgs::msg::Pose();
+            ray.pose.orientation.w              = 1.0;
+            geometry_msgs::msg::Point robot;
+            robot.x = last_scan_pose_.translation().x();
+            robot.y = last_scan_pose_.translation().y();
+            robot.z = last_scan_pose_.translation().z();
+            geometry_msgs::msg::Point marker_point;
+            marker_point.x = position.x();
+            marker_point.y = position.y();
+            marker_point.z = position.z();
+            ray.points     = { robot, marker_point };
+            ray.color.r    = 0.1F;
+            ray.color.g    = 0.9F;
+            ray.color.b    = 0.1F;
+            ray.color.a    = 0.9F;
+            array.markers.push_back(ray);
+        }
+        else
+        {
+            visualization_msgs::msg::Marker clear;
+            clear.header.frame_id = map_frame_;
+            clear.ns              = "anchor_rays";
+            clear.id              = id;
+            clear.action          = visualization_msgs::msg::Marker::DELETE;
+            array.markers.push_back(clear);
+        }
+    }
+    debug_fiducials_pub_->publish(array);
 }
 
 void FusionNode::publishOdometry(const gtsam::Pose3& pose, double stamp)

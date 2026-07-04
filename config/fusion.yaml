@@ -63,6 +63,15 @@ fusion_node:
     map_edge_leaf_size: 0.1
     map_planar_leaf_size: 0.2
 
+    # Debug / RViz visualization (topics under /olive/debug/*).
+    # All flags are live-switchable: ros2 param set /fusion_node publish_debug true
+    publish_debug: true          # master switch
+    debug_path: true             # fused keyframe trajectory      (nav_msgs/Path)
+    debug_keyframes: true        # keyframe poses                 (PoseArray)
+    debug_local_map: true        # local edge/planar feature maps (PointCloud2)
+    debug_scan_features: true    # current scan features, map frame (PointCloud2)
+    debug_fiducials: true        # known markers + anchor rays    (MarkerArray)
+
     # iSAM2 backend
     relinearize_threshold: 0.1
     relinearize_skip: 1
