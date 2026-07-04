@@ -42,6 +42,18 @@ void FusionNode::declareParameters()
         "wheel_between_sigmas", std::vector<double>{ 0.03, 0.03, 0.5, 0.5, 0.5, 0.2 });
     declare_parameter("planar_prior_sigmas", std::vector<double>{ 0.02, 0.009, 0.009 });
 
+    declare_parameter("use_markers", true);
+    declare_parameter("marker_topic", "/whycode/poses");
+    declare_parameter("camera_translation", std::vector<double>{ 0.2, 0.0, 0.06 });
+    declare_parameter("camera_rpy", std::vector<double>{ -M_PI_2, 0.0, -M_PI_2 });
+    declare_parameter("marker_position_sigma_m", 0.10);
+    declare_parameter("marker_stamp_window_s", 0.25);
+    declare_parameter("marker_min_range_m", 0.5);
+    declare_parameter("marker_max_range_m", 6.0);
+    declare_parameter("marker_min_track_frames", 3);
+    declare_parameter("known_marker_ids", std::vector<int64_t>{});
+    declare_parameter("known_marker_positions", std::vector<double>{});
+
     declare_parameter("lidar_translation", std::vector<double>{ 0.0, 0.0, 0.145 });
     declare_parameter("lidar_rpy", std::vector<double>{ 0.0, 0.0, 0.0 });
 
@@ -91,6 +103,36 @@ void FusionNode::loadConfiguration()
     const auto planar_sigmas = get_parameter("planar_prior_sigmas").as_double_array();
     for (size_t i = 0; i < 3 && i < planar_sigmas.size(); ++i)
         planar_prior_sigmas_[i] = planar_sigmas[i];
+
+    use_markers_  = get_parameter("use_markers").as_bool();
+    marker_topic_ = get_parameter("marker_topic").as_string();
+
+    const auto cam_t   = get_parameter("camera_translation").as_double_array();
+    const auto cam_rpy = get_parameter("camera_rpy").as_double_array();
+    base_from_camera_  = gtsam::Pose3(
+        gtsam::Rot3::Ypr(cam_rpy[2], cam_rpy[1], cam_rpy[0]),
+        gtsam::Point3(cam_t[0], cam_t[1], cam_t[2]));
+
+    marker_sigma_m_      = get_parameter("marker_position_sigma_m").as_double();
+    marker_stamp_window_ = get_parameter("marker_stamp_window_s").as_double();
+
+    MarkerGateConfig gate_config;
+    gate_config.min_range        = get_parameter("marker_min_range_m").as_double();
+    gate_config.max_range        = get_parameter("marker_max_range_m").as_double();
+    gate_config.min_track_frames =
+        static_cast<int>(get_parameter("marker_min_track_frames").as_int());
+
+    known_markers_.clear();
+    const auto ids       = get_parameter("known_marker_ids").as_integer_array();
+    const auto positions = get_parameter("known_marker_positions").as_double_array();
+    for (size_t i = 0; i < ids.size() && i * 3 + 2 < positions.size(); ++i)
+    {
+        const int id = static_cast<int>(ids[i]);
+        known_markers_.emplace(
+            id, gtsam::Point3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]));
+        gate_config.known_ids.insert(id);
+    }
+    marker_gate_ = std::make_unique<MarkerGate>(gate_config);
 
     const auto translation               = get_parameter("lidar_translation").as_double_array();
     const auto rpy                       = get_parameter("lidar_rpy").as_double_array();
@@ -182,6 +224,11 @@ FusionNode::CallbackReturn FusionNode::on_activate(const rclcpp_lifecycle::State
         wheel_odom_topic_,
         rclcpp::SensorDataQoS().keep_last(50),
         [this](nav_msgs::msg::Odometry::SharedPtr msg) { wheelOdomCallback(msg); });
+    if (use_markers_)
+        marker_sub_ = create_subscription<whycode_vision::msg::WhyCodePoseArray>(
+            marker_topic_,
+            rclcpp::QoS(10),
+            [this](whycode_vision::msg::WhyCodePoseArray::SharedPtr msg) { markerCallback(msg); });
 
     RCLCPP_INFO(get_logger(), "Activated");
     return CallbackReturn::SUCCESS;
@@ -192,6 +239,7 @@ FusionNode::CallbackReturn FusionNode::on_deactivate(const rclcpp_lifecycle::Sta
     points_sub_.reset();
     imu_sub_.reset();
     wheel_sub_.reset();
+    marker_sub_.reset();
     LifecycleNode::on_deactivate(state);
     return CallbackReturn::SUCCESS;
 }
@@ -201,6 +249,7 @@ FusionNode::CallbackReturn FusionNode::on_cleanup(const rclcpp_lifecycle::State&
     points_sub_.reset();
     imu_sub_.reset();
     wheel_sub_.reset();
+    marker_sub_.reset();
     odom_pub_.reset();
     tf_broadcaster_.reset();
     preprocessor_.reset();
@@ -230,6 +279,21 @@ void FusionNode::wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
     const double stamp =
         static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec;
     wheel_buffer_.push(stamp, gtsam_conversions::toGtsamPose(msg->pose.pose));
+}
+
+void FusionNode::markerCallback(const whycode_vision::msg::WhyCodePoseArray::SharedPtr msg)
+{
+    const double stamp =
+        static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec;
+    for (const auto& detection : msg->poses)
+    {
+        marker_gate_->push(
+            stamp,
+            detection.whycode_id,
+            detection.tracking_id,
+            detection.id_valid,
+            gtsam_conversions::toGtsamPoint(detection.pose.position));
+    }
 }
 
 void FusionNode::bootstrapFirstKeyframe(const FeatureClouds& features)
@@ -330,12 +394,41 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
         if (use_planar_prior_)
             pose_graph_->addPlanarPrior(planar_prior_sigmas_);
 
-        pose_graph_->optimize();
+        int anchors = 0;
+        if (use_markers_)
+        {
+            for (const MarkerObservation& obs :
+                 marker_gate_->collectNear(features_.stamp, marker_stamp_window_))
+            {
+                pose_graph_->addMarkerAnchor(
+                    obs.position_in_camera,
+                    known_markers_.at(obs.marker_id),
+                    base_from_camera_,
+                    marker_sigma_m_);
+                ++anchors;
+            }
+        }
+
+        const bool corrected = pose_graph_->optimize();
 
         const gtsam::Pose3 optimized = pose_graph_->latestPose();
         Cloud::Ptr         edge_copy(new Cloud(*features_.edge));
         Cloud::Ptr         planar_copy(new Cloud(*features_.planar));
         keyframe_map_->add(optimized, edge_copy, planar_copy, features_.stamp);
+
+        if (corrected)
+        {
+            // A marker anchor bent the past trajectory: refresh every stored
+            // keyframe pose and drop the transformed-cloud cache.
+            const auto poses = pose_graph_->allPoses();
+            for (size_t i = 0; i < poses.size(); ++i) keyframe_map_->updatePose(i, poses[i]);
+            keyframe_map_->invalidateCache();
+            RCLCPP_INFO(
+                get_logger(),
+                "Marker anchor applied (%d observation%s) - trajectory corrected",
+                anchors,
+                anchors == 1 ? "" : "s");
+        }
 
         last_scan_pose_ = optimized;
     }

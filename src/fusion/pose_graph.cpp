@@ -6,6 +6,8 @@
 #include <gtsam/slam/PriorFactor.h>
 #include <gtsam_unstable/slam/PartialPriorFactor.h>
 
+#include "olive/fusion/marker_anchor_factor.hpp"
+
 namespace olive
 {
 
@@ -79,13 +81,37 @@ void PoseGraph::addPlanarPrior(const std::array<double, 3>& sigmas)
         gtsam::PartialPriorFactor<gtsam::Pose3>(X(num_keyframes_ - 1), indices, measured, noise));
 }
 
-void PoseGraph::optimize()
+void PoseGraph::addMarkerAnchor(const gtsam::Point3& measured_in_camera,
+                                const gtsam::Point3& marker_in_world,
+                                const gtsam::Pose3& base_from_camera, double sigma)
+{
+    // Robust kernel: one mis-decoded marker must not yank the trajectory.
+    const auto noise = gtsam::noiseModel::Robust::Create(
+        gtsam::noiseModel::mEstimator::Cauchy::Create(0.1),
+        gtsam::noiseModel::Isotropic::Sigma(3, sigma));
+    pending_factors_.add(MarkerAnchorFactor(
+        X(num_keyframes_ - 1), measured_in_camera, marker_in_world, base_from_camera, noise));
+    has_global_factor_ = true;
+}
+
+bool PoseGraph::optimize()
 {
     isam_.update(pending_factors_, pending_values_);
     isam_.update();
+
+    const bool corrected = has_global_factor_;
+    if (corrected)
+    {
+        // An anchor bends the whole recent trajectory; extra relinearization
+        // rounds let the correction propagate through the graph.
+        for (int i = 0; i < 5; ++i) isam_.update();
+        has_global_factor_ = false;
+    }
+
     pending_factors_.resize(0);
     pending_values_.clear();
     current_estimate_ = isam_.calculateEstimate();
+    return corrected;
 }
 
 gtsam::Pose3 PoseGraph::pose(size_t index) const

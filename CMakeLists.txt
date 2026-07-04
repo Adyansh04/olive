@@ -36,6 +36,7 @@ find_package(image_transport REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(PCL REQUIRED COMPONENTS common io registration filters)
+find_package(whycode_vision REQUIRED)
 find_package(GTSAM REQUIRED)
 find_package(GTSAM_UNSTABLE REQUIRED)
 
@@ -76,8 +77,9 @@ add_executable(fusion_node
   src/fusion/keyframe_map.cpp
   src/fusion/pose_graph.cpp
   src/fusion/wheel_odom_buffer.cpp
+  src/fusion/marker_gate.cpp
 )
-ament_target_dependencies(fusion_node ${COMMON_DEPENDENCIES})
+ament_target_dependencies(fusion_node ${COMMON_DEPENDENCIES} whycode_vision)
 target_link_libraries(fusion_node ${PCL_LIBRARIES} gtsam gtsam_unstable)
 
 install(TARGETS
@@ -112,6 +114,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_scan_matcher test/test_scan_matcher.cpp src/fusion/scan_matcher.cpp)
   target_link_libraries(test_scan_matcher ${PCL_LIBRARIES})
+
+  ament_add_gtest(test_marker_anchor test/test_marker_anchor.cpp)
+  target_link_libraries(test_marker_anchor gtsam)
 endif()
 
 ament_package()
