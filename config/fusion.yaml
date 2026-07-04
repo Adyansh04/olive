@@ -26,6 +26,13 @@ fusion_node:
 
     odom_frame: odom
     base_frame: base_link
+    map_frame: map
+    wheel_odom_topic: /odom
+
+    # REP-105: broadcast only the map->odom correction (wheel odom owns
+    # odom->base). The fused pose is published in the map frame.
+    publish_map_tf: true
+    use_planar_prior: true
 
     # Fixed base<-lidar extrinsic (from the URDF; TF-driven on real hardware later)
     lidar_translation: [0.0, 0.0, 0.145]

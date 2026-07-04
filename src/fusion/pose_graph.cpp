@@ -4,6 +4,7 @@
 #include <gtsam/nonlinear/Marginals.h>
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/slam/PriorFactor.h>
+#include <gtsam_unstable/slam/PartialPriorFactor.h>
 
 namespace olive
 {
@@ -55,6 +56,27 @@ void PoseGraph::addKeyframe(
         gtsam::BetweenFactor<gtsam::Pose3>(X(n - 1), X(n), relative, toNoiseModel(sigmas)));
     pending_values_.insert(X(n), pose);
     ++num_keyframes_;
+}
+
+void PoseGraph::addOdometryFactor(const gtsam::Pose3& relative, const FactorSigmas& sigmas)
+{
+    const size_t n = num_keyframes_ - 1;
+    pending_factors_.add(
+        gtsam::BetweenFactor<gtsam::Pose3>(X(n - 1), X(n), relative, toNoiseModel(sigmas)));
+}
+
+void PoseGraph::addPlanarPrior(const std::array<double, 3>& sigmas)
+{
+    // Pose3 tangent order is [roll, pitch, yaw, x, y, z].
+    const std::vector<size_t> indices = { 0, 1, 5 };
+    gtsam::Vector3            measured;
+    measured << 0.0, 0.0, 0.0;
+
+    const auto noise = gtsam::noiseModel::Diagonal::Sigmas(
+        (gtsam::Vector3() << sigmas[1], sigmas[2], sigmas[0]).finished());
+
+    pending_factors_.add(
+        gtsam::PartialPriorFactor<gtsam::Pose3>(X(num_keyframes_ - 1), indices, measured, noise));
 }
 
 void PoseGraph::optimize()
