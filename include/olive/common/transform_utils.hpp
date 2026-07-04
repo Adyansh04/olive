@@ -34,9 +34,9 @@ namespace transform_utils
 inline geometry_msgs::msg::Pose eigenToRosPose(const Pose3D& pose)
 {
     geometry_msgs::msg::Pose ros_pose;
-    ros_pose.position.x = pose.position.x();
-    ros_pose.position.y = pose.position.y();
-    ros_pose.position.z = pose.position.z();
+    ros_pose.position.x    = pose.position.x();
+    ros_pose.position.y    = pose.position.y();
+    ros_pose.position.z    = pose.position.z();
     ros_pose.orientation.w = pose.orientation.w();
     ros_pose.orientation.x = pose.orientation.x();
     ros_pose.orientation.y = pose.orientation.y();
@@ -67,9 +67,9 @@ inline nav_msgs::msg::Odometry toRosOdometry(const OdometryMeasurement& odom)
     nav_msgs::msg::Odometry ros_odom;
 
     // Header
-    ros_odom.header.stamp = rclcpp::Time(static_cast<int64_t>(odom.timestamp * 1e9));
+    ros_odom.header.stamp    = rclcpp::Time(static_cast<int64_t>(odom.timestamp * 1e9));
     ros_odom.header.frame_id = odom.frame_id;
-    ros_odom.child_frame_id = odom.child_frame_id;
+    ros_odom.child_frame_id  = odom.child_frame_id;
 
     // Pose
     ros_odom.pose.pose = eigenToRosPose(odom.pose);
@@ -84,9 +84,9 @@ inline nav_msgs::msg::Odometry toRosOdometry(const OdometryMeasurement& odom)
     }
 
     // Twist (velocity)
-    ros_odom.twist.twist.linear.x = odom.velocity.linear.x();
-    ros_odom.twist.twist.linear.y = odom.velocity.linear.y();
-    ros_odom.twist.twist.linear.z = odom.velocity.linear.z();
+    ros_odom.twist.twist.linear.x  = odom.velocity.linear.x();
+    ros_odom.twist.twist.linear.y  = odom.velocity.linear.y();
+    ros_odom.twist.twist.linear.z  = odom.velocity.linear.z();
     ros_odom.twist.twist.angular.x = odom.velocity.angular.x();
     ros_odom.twist.twist.angular.y = odom.velocity.angular.y();
     ros_odom.twist.twist.angular.z = odom.velocity.angular.z();
@@ -102,12 +102,12 @@ inline OdometryMeasurement fromRosOdometry(const nav_msgs::msg::Odometry& ros_od
     OdometryMeasurement odom;
 
     // Timestamp
-    odom.timestamp = ros_odom.header.stamp.sec + ros_odom.header.stamp.nanosec * 1e-9;
-    odom.frame_id = ros_odom.header.frame_id;
+    odom.timestamp      = ros_odom.header.stamp.sec + ros_odom.header.stamp.nanosec * 1e-9;
+    odom.frame_id       = ros_odom.header.frame_id;
     odom.child_frame_id = ros_odom.child_frame_id;
 
     // Pose
-    odom.pose = rosPoseToEigen(ros_odom.pose.pose);
+    odom.pose           = rosPoseToEigen(ros_odom.pose.pose);
     odom.pose.timestamp = odom.timestamp;
 
     // Pose covariance
@@ -139,9 +139,9 @@ inline OdometryMeasurement fromRosOdometry(const nav_msgs::msg::Odometry& ros_od
 inline Pose3D composePoses(const Pose3D& pose1, const Pose3D& pose2)
 {
     Pose3D result;
-    result.position = pose1.position + pose1.orientation * pose2.position;
+    result.position    = pose1.position + pose1.orientation * pose2.position;
     result.orientation = pose1.orientation * pose2.orientation;
-    result.timestamp = pose2.timestamp;  // Use the latest timestamp
+    result.timestamp   = pose2.timestamp;  // Use the latest timestamp
     return result;
 }
 
@@ -152,8 +152,8 @@ inline Pose3D inversePose(const Pose3D& pose)
 {
     Pose3D result;
     result.orientation = pose.orientation.inverse();
-    result.position = -(result.orientation * pose.position);
-    result.timestamp = pose.timestamp;
+    result.position    = -(result.orientation * pose.position);
+    result.timestamp   = pose.timestamp;
     return result;
 }
 
@@ -195,9 +195,9 @@ inline Eigen::Vector3d quaternionToEuler(const Eigen::Quaterniond& q)
 inline Pose3D interpolatePose(const Pose3D& pose1, const Pose3D& pose2, double alpha)
 {
     Pose3D result;
-    result.position = (1.0 - alpha) * pose1.position + alpha * pose2.position;
+    result.position    = (1.0 - alpha) * pose1.position + alpha * pose2.position;
     result.orientation = pose1.orientation.slerp(alpha, pose2.orientation);
-    result.timestamp = (1.0 - alpha) * pose1.timestamp + alpha * pose2.timestamp;
+    result.timestamp   = (1.0 - alpha) * pose1.timestamp + alpha * pose2.timestamp;
     return result;
 }
 
@@ -208,12 +208,12 @@ inline Eigen::Matrix<double, 6, 6> createDiagonalCovariance(
     double pos_x, double pos_y, double pos_z, double rot_x, double rot_y, double rot_z)
 {
     Eigen::Matrix<double, 6, 6> cov = Eigen::Matrix<double, 6, 6>::Zero();
-    cov(0, 0) = pos_x * pos_x;
-    cov(1, 1) = pos_y * pos_y;
-    cov(2, 2) = pos_z * pos_z;
-    cov(3, 3) = rot_x * rot_x;
-    cov(4, 4) = rot_y * rot_y;
-    cov(5, 5) = rot_z * rot_z;
+    cov(0, 0)                       = pos_x * pos_x;
+    cov(1, 1)                       = pos_y * pos_y;
+    cov(2, 2)                       = pos_z * pos_z;
+    cov(3, 3)                       = rot_x * rot_x;
+    cov(4, 4)                       = rot_y * rot_y;
+    cov(5, 5)                       = rot_z * rot_z;
     return cov;
 }
 

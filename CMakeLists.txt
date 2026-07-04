@@ -1,13 +1,15 @@
 cmake_minimum_required(VERSION 3.8)
 project(olive)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Default to C++17
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic -O3)
+  # add_compile_options(-Wall -Wextra -Wpedantic -O3 -march=native -DNDEBUG)
 endif()
 
 # Find dependencies
@@ -57,7 +59,23 @@ set(COMMON_DEPENDENCIES
   cv_bridge
   image_transport
 )
-    
+
+# Node: Lidar Odometry 
+add_executable(lidar_odom_node
+  src/nodes/lidar_odom_node.cpp
+  src/lidar_odom/lidar_odometry.cpp
+  src/lidar_odom/feature_extractor.cpp
+  src/lidar_odom/feature_registration.cpp
+  src/lidar_odom/local_map.cpp
+)
+ament_target_dependencies(lidar_odom_node ${COMMON_DEPENDENCIES})
+target_link_libraries(lidar_odom_node ${PCL_LIBRARIES})
+
+# Install targets
+install(TARGETS
+  lidar_odom_node
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 # Install launch files
 install(DIRECTORY
