@@ -143,6 +143,15 @@ void FusionNode::declareParameters()
     declare_parameter("debug_scan_features", true);
     declare_parameter("debug_fiducials", true);
 
+    declare_parameter("loop_closure_enabled", true);
+    declare_parameter("loop_search_radius_m", 3.0);
+    declare_parameter("loop_min_time_diff_s", 30.0);
+    declare_parameter("loop_submap_half_width", 12);
+    declare_parameter("loop_fitness_threshold", 0.3);
+    declare_parameter("loop_max_correction_m", 3.0);
+    declare_parameter("loop_min_interval_s", 5.0);
+    declare_parameter("loop_sigma_floor", 0.05);
+
     declare_parameter("optimize_budget_warn_ms", 50.0);
 
     declare_parameter("diagnostics_period_s", 1.0);
@@ -288,6 +297,21 @@ void FusionNode::loadConfiguration()
     keyframe_config_.cloud_voxel = get_parameter("cloud_voxel_m").as_double();
     keyframe_config_.max_cloud_keyframes =
         static_cast<size_t>(std::max<int64_t>(0, get_parameter("max_cloud_keyframes").as_int()));
+
+    loop_closure_enabled_ = get_parameter("loop_closure_enabled").as_bool();
+    loop_min_interval_s_  = get_parameter("loop_min_interval_s").as_double();
+    loop_sigma_floor_     = get_parameter("loop_sigma_floor").as_double();
+
+    LoopDetectorConfig loop_config;
+    loop_config.search_radius     = get_parameter("loop_search_radius_m").as_double();
+    loop_config.min_time_diff     = get_parameter("loop_min_time_diff_s").as_double();
+    loop_config.submap_half_width =
+        static_cast<int>(get_parameter("loop_submap_half_width").as_int());
+    loop_config.fitness_threshold = get_parameter("loop_fitness_threshold").as_double();
+    loop_config.max_correction    = get_parameter("loop_max_correction_m").as_double();
+    loop_config.planar            = planar_motion_;
+    loop_detector_                = std::make_unique<LoopDetector>(loop_config);
+    last_loop_attempt_            = -1.0;
 
     optimize_budget_warn_ms_ = get_parameter("optimize_budget_warn_ms").as_double();
 
@@ -1002,12 +1026,7 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
 
         if (corrected)
         {
-            // A marker anchor bent the past trajectory: refresh every stored
-            // keyframe pose and drop the transformed-cloud cache.
-            const auto poses = pose_graph_->allPoses();
-            for (size_t i = 0; i < poses.size(); ++i)
-                keyframe_map_->updatePose(i, poses[i]);
-            keyframe_map_->invalidateCache();
+            refreshAfterCorrection();
             RCLCPP_INFO(
                 get_logger(),
                 "Marker anchor applied (%d observation%s) - trajectory corrected",
@@ -1015,8 +1034,11 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
                 anchors == 1 ? "" : "s");
         }
 
-        last_scan_pose_ = optimized;
+        last_scan_pose_ = corrected ? pose_graph_->latestPose() : optimized;
         publishKeyframeDebug(corrected, features_.stamp);
+
+        if (loop_closure_enabled_)
+            attemptLoopClosure(features_.stamp);
     }
 
     publishOdometry(last_scan_pose_, features_.stamp);
@@ -1042,6 +1064,45 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
         static_cast<double>(scan_matcher_->constraintEigenvalues()(1)),
         static_cast<double>(scan_matcher_->constraintEigenvalues()(2)),
         pipeline_ms);
+}
+
+void FusionNode::refreshAfterCorrection()
+{
+    // A global factor bent the past trajectory: refresh every stored
+    // keyframe pose and drop the transformed-cloud cache.
+    const auto poses = pose_graph_->allPoses();
+    for (size_t i = 0; i < poses.size(); ++i)
+        keyframe_map_->updatePose(i, poses[i]);
+    keyframe_map_->invalidateCache();
+}
+
+void FusionNode::attemptLoopClosure(double stamp)
+{
+    if (keyframe_map_->size() < 10)
+        return;
+    if (last_loop_attempt_ >= 0.0 && stamp - last_loop_attempt_ < loop_min_interval_s_)
+        return;
+    last_loop_attempt_ = stamp;
+
+    const size_t current = keyframe_map_->size() - 1;
+    const auto   loop    = loop_detector_->detect(*keyframe_map_, current);
+    if (!loop)
+        return;
+
+    pose_graph_->addLoopFactor(
+        loop->old_index, current, loop->relative, std::max(loop->fitness, loop_sigma_floor_));
+    if (pose_graph_->optimize() != PoseGraph::OptimizeResult::CORRECTED)
+        return;
+
+    refreshAfterCorrection();
+    last_scan_pose_ = pose_graph_->latestPose();
+    publishKeyframeDebug(true, stamp);
+    RCLCPP_INFO(
+        get_logger(),
+        "Loop closed: keyframe %zu revisits %zu (fitness %.3f) - trajectory corrected",
+        current,
+        loop->old_index,
+        loop->fitness);
 }
 
 void FusionNode::publishDiagnostics()

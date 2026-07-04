@@ -118,6 +118,16 @@ fusion_node:
     max_cloud_keyframes: 1000
     optimize_budget_warn_ms: 80.0
 
+    # --- loop closure -------------------------------------------------------
+    loop_closure_enabled: true
+    loop_search_radius_m: 3.0
+    loop_min_time_diff_s: 30.0
+    loop_submap_half_width: 12
+    loop_fitness_threshold: 0.3
+    loop_max_correction_m: 3.0
+    loop_min_interval_s: 5.0
+    loop_sigma_floor: 0.05
+
     # --- graph ------------------------------------------------------------
     relinearize_threshold: 0.1
     relinearize_skip: 1

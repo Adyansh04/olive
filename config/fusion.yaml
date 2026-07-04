@@ -144,6 +144,20 @@ fusion_node:
     dropout_keyframes: false
     prediction_gap_wheel_fallback_s: 0.5
 
+    # Loop closure: when the robot revisits a place it mapped earlier
+    # (sufficiently old, cloud-bearing, good-quality keyframes), an ICP
+    # alignment against that neighborhood adds a robust between factor and
+    # the existing correction machinery bends the trajectory. The implied
+    # correction is sanity-gated: one false loop can fold the map.
+    loop_closure_enabled: true
+    loop_search_radius_m: 3.0
+    loop_min_time_diff_s: 30.0
+    loop_submap_half_width: 12
+    loop_fitness_threshold: 0.3
+    loop_max_correction_m: 3.0
+    loop_min_interval_s: 5.0
+    loop_sigma_floor: 0.05
+
     # iSAM2 backend
     optimize_budget_warn_ms: 50.0
     relinearize_threshold: 0.1
