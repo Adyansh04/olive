@@ -60,11 +60,15 @@ void PoseGraph::addKeyframe(
     ++num_keyframes_;
 }
 
-void PoseGraph::addOdometryFactor(const gtsam::Pose3& relative, const FactorSigmas& sigmas)
+void PoseGraph::addOdometryFactor(const gtsam::Pose3& relative, const FactorSigmas& sigmas,
+                                  bool robust)
 {
-    const size_t n = num_keyframes_ - 1;
-    pending_factors_.add(
-        gtsam::BetweenFactor<gtsam::Pose3>(X(n - 1), X(n), relative, toNoiseModel(sigmas)));
+    const size_t          n     = num_keyframes_ - 1;
+    gtsam::SharedNoiseModel noise = toNoiseModel(sigmas);
+    if (robust)
+        noise = gtsam::noiseModel::Robust::Create(
+            gtsam::noiseModel::mEstimator::Cauchy::Create(0.1), noise);
+    pending_factors_.add(gtsam::BetweenFactor<gtsam::Pose3>(X(n - 1), X(n), relative, noise));
 }
 
 void PoseGraph::addPlanarPrior(const std::array<double, 3>& sigmas)

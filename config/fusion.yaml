@@ -90,6 +90,10 @@ fusion_node:
                              -7.5, -7.5, 1.2,
                               7.5, -7.5, 1.2]
 
+    # Visual odometry input (used only when the vo modality is enabled)
+    vo_topic: /olive/visual_odom
+    vo_between_sigmas: [0.1, 0.1, 1.0, 1.0, 1.0, 0.1]
+
     # Noise sigmas, ROS order [x, y, z, roll, pitch, yaw] (m / rad).
     # Scan-match confidence is not well calibrated -> hand-tuned here.
     lidar_between_sigmas: [0.01, 0.01, 0.01, 0.001, 0.001, 0.001]
@@ -102,6 +106,14 @@ fusion_node:
 vo_node:
   ros__parameters:
     use_sim_time: true
+    autostart: true
     image_topic: /camera/image_raw
     camera_info_topic: /camera/camera_info
+    wheel_odom_topic: /odom          # metric scale source (monocular scale
+                                     # is unobservable on this platform)
     odom_topic: /olive/visual_odom
+    max_features: 300
+    min_tracked_features: 15
+    min_parallax_px: 5.0
+    ransac_threshold_px: 1.0
+    min_wheel_motion_m: 0.03

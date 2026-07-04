@@ -42,6 +42,10 @@ void FusionNode::declareParameters()
         "wheel_between_sigmas", std::vector<double>{ 0.03, 0.03, 0.5, 0.5, 0.5, 0.2 });
     declare_parameter("planar_prior_sigmas", std::vector<double>{ 0.02, 0.009, 0.009 });
 
+    declare_parameter("use_vo", false);
+    declare_parameter("vo_topic", "/olive/visual_odom");
+    declare_parameter(
+        "vo_between_sigmas", std::vector<double>{ 0.1, 0.1, 1.0, 1.0, 1.0, 0.1 });
     declare_parameter("use_markers", true);
     declare_parameter("marker_topic", "/whycode/poses");
     declare_parameter("camera_translation", std::vector<double>{ 0.2, 0.0, 0.06 });
@@ -103,6 +107,11 @@ void FusionNode::loadConfiguration()
     const auto planar_sigmas = get_parameter("planar_prior_sigmas").as_double_array();
     for (size_t i = 0; i < 3 && i < planar_sigmas.size(); ++i)
         planar_prior_sigmas_[i] = planar_sigmas[i];
+
+    use_vo_   = get_parameter("use_vo").as_bool();
+    vo_topic_ = get_parameter("vo_topic").as_string();
+    const auto vo_sigmas = get_parameter("vo_between_sigmas").as_double_array();
+    for (size_t i = 0; i < 6 && i < vo_sigmas.size(); ++i) vo_between_sigmas_[i] = vo_sigmas[i];
 
     use_markers_  = get_parameter("use_markers").as_bool();
     marker_topic_ = get_parameter("marker_topic").as_string();
@@ -224,6 +233,15 @@ FusionNode::CallbackReturn FusionNode::on_activate(const rclcpp_lifecycle::State
         wheel_odom_topic_,
         rclcpp::SensorDataQoS().keep_last(50),
         [this](nav_msgs::msg::Odometry::SharedPtr msg) { wheelOdomCallback(msg); });
+    if (use_vo_)
+        vo_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+            vo_topic_,
+            rclcpp::QoS(10),
+            [this](nav_msgs::msg::Odometry::SharedPtr msg) {
+                const double stamp = static_cast<double>(msg->header.stamp.sec) +
+                                     1e-9 * msg->header.stamp.nanosec;
+                vo_buffer_.push(stamp, gtsam_conversions::toGtsamPose(msg->pose.pose));
+            });
     if (use_markers_)
         marker_sub_ = create_subscription<whycode_vision::msg::WhyCodePoseArray>(
             marker_topic_,
@@ -240,6 +258,7 @@ FusionNode::CallbackReturn FusionNode::on_deactivate(const rclcpp_lifecycle::Sta
     imu_sub_.reset();
     wheel_sub_.reset();
     marker_sub_.reset();
+    vo_sub_.reset();
     LifecycleNode::on_deactivate(state);
     return CallbackReturn::SUCCESS;
 }
@@ -250,6 +269,7 @@ FusionNode::CallbackReturn FusionNode::on_cleanup(const rclcpp_lifecycle::State&
     imu_sub_.reset();
     wheel_sub_.reset();
     marker_sub_.reset();
+    vo_sub_.reset();
     odom_pub_.reset();
     tf_broadcaster_.reset();
     preprocessor_.reset();
@@ -390,6 +410,14 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
                 wheel_buffer_.relativePose(previous_stamp, features_.stamp);
             if (wheel_relative)
                 pose_graph_->addOdometryFactor(*wheel_relative, wheel_between_sigmas_);
+        }
+        if (use_vo_)
+        {
+            // VO increments are wheel-scaled and only trustworthy in-plane:
+            // loose z/roll/pitch, robustified against tracking failures.
+            const auto vo_relative = vo_buffer_.relativePose(previous_stamp, features_.stamp);
+            if (vo_relative)
+                pose_graph_->addOdometryFactor(*vo_relative, vo_between_sigmas_, true);
         }
         if (use_planar_prior_)
             pose_graph_->addPlanarPrior(planar_prior_sigmas_);

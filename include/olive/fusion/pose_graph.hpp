@@ -60,7 +60,8 @@ public:
      *
      * Call after addKeyframe() and before optimize().
      */
-    void addOdometryFactor(const gtsam::Pose3& relative, const FactorSigmas& sigmas);
+    void addOdometryFactor(const gtsam::Pose3& relative, const FactorSigmas& sigmas,
+                           bool robust = false);
 
     /**
      * @brief Softly pin z, roll and pitch of the newest keyframe to zero

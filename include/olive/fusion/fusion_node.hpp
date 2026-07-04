@@ -74,6 +74,9 @@ private:
     bool         use_planar_prior_ = true;
     bool         publish_map_tf_   = true;
     bool         use_markers_      = true;
+    bool         use_vo_           = false;
+    std::string  vo_topic_;
+    FactorSigmas vo_between_sigmas_{};
     std::string  marker_topic_;
     gtsam::Pose3 base_from_camera_;
     double       marker_sigma_m_      = 0.10;
@@ -96,6 +99,7 @@ private:
     std::unique_ptr<PoseGraph>        pose_graph_;
     ImuBuffer                         imu_buffer_;
     WheelOdomBuffer                   wheel_buffer_;
+    WheelOdomBuffer                   vo_buffer_;
     std::unique_ptr<MarkerGate>       marker_gate_;
 
     // Per-scan state (reused buffers; hot path must not allocate)
@@ -111,6 +115,7 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr                   imu_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr                 wheel_sub_;
     rclcpp::Subscription<whycode_vision::msg::WhyCodePoseArray>::SharedPtr   marker_sub_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr                 vo_sub_;
     std::unique_ptr<tf2_ros::TransformBroadcaster>                           tf_broadcaster_;
     rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
     nav_msgs::msg::Odometry                                                  odom_msg_;
