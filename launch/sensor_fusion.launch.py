@@ -76,6 +76,15 @@ def launch_fusion_stack(context, *args, **kwargs):
     }
 
     actions = []
+    if context.launch_configurations.get('rviz', 'false') == 'true':
+        actions.append(Node(
+            package='rviz2',
+            executable='rviz2',
+            name='rviz2',
+            arguments=['-d', os.path.join(pkg_olive, 'rviz', 'fusion_debug.rviz')],
+            parameters=[{'use_sim_time': True}],
+            output='screen',
+        ))
     enabled = [name for name, on in modalities.items() if on]
     print(f"[olive] fusion config: {config_file}")
     print(f"[olive] enabled modalities: {', '.join(enabled) if enabled else 'none'}")
@@ -97,8 +106,14 @@ def generate_launch_description():
         default_value='',
         description='Path to a fusion.yaml override (defaults to the installed config)'
     )
+    declare_rviz = DeclareLaunchArgument(
+        'rviz',
+        default_value='false',
+        description='Start RViz with the fusion debug configuration'
+    )
 
     ld = LaunchDescription()
     ld.add_action(declare_config_file)
+    ld.add_action(declare_rviz)
     ld.add_action(OpaqueFunction(function=launch_fusion_stack))
     return ld

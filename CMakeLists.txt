@@ -29,6 +29,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_eigen REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(cv_bridge REQUIRED)
@@ -60,6 +61,7 @@ set(COMMON_DEPENDENCIES
   tf2_ros
   tf2_eigen
   tf2_geometry_msgs
+  visualization_msgs
   pcl_ros
   pcl_conversions
   cv_bridge
@@ -106,6 +108,22 @@ install(DIRECTORY
 install(DIRECTORY
   config
   DESTINATION share/${PROJECT_NAME}
+)
+
+# Install RViz configuration
+install(DIRECTORY
+  rviz
+  DESTINATION share/${PROJECT_NAME}
+)
+
+# Install test / calibration scripts (ros2 run olive <script>)
+install(PROGRAMS
+  scripts/bringup_test.sh
+  scripts/drive_test.py
+  scripts/ate_eval.py
+  scripts/marker_demo.py
+  scripts/calibrate_marker_range.py
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 # Install header files
