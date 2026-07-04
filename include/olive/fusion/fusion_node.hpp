@@ -65,6 +65,10 @@ private:
     gtsam::Pose3 predictPose(double scan_stamp) const;
     void         publishOdometry(const gtsam::Pose3& pose, double stamp);
 
+    // IMU startup initialization (gyro bias + sanity checks; gates scans)
+    void handleImuInit(double stamp);
+    void reestimateGyroBias();
+
     // Debug / RViz visualization (all gated by parameters, live-switchable)
     void publishKeyframeDebug(bool trajectory_corrected, double stamp);
     void publishScanDebug(double stamp);
@@ -127,6 +131,17 @@ private:
     gtsam::Pose3 last_increment_;
     double       last_scan_stamp_ = -1.0;
 
+    // IMU initialization state
+    bool   imu_init_done_          = false;
+    double imu_init_window_start_  = -1.0;
+    double imu_init_first_stamp_   = -1.0;
+    double first_scan_stamp_       = -1.0;
+    double imu_init_duration_s_    = 1.5;
+    double imu_init_max_wait_s_    = 10.0;
+    double stationary_gyro_thresh_ = 0.02;
+    double stationary_wheel_thresh_ = 0.005;
+    bool   gyro_bias_reestimate_   = false;
+
     // ROS interfaces
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr           points_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr                   imu_sub_;
@@ -150,6 +165,7 @@ private:
                                  debug_fiducials_pub_;
     nav_msgs::msg::Odometry      odom_msg_;
     rclcpp::TimerBase::SharedPtr autostart_timer_;
+    rclcpp::TimerBase::SharedPtr bias_reestimate_timer_;
 
     // Debug state
     nav_msgs::msg::Path             debug_path_msg_;

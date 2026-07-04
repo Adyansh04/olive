@@ -123,6 +123,7 @@ install(PROGRAMS
   scripts/ate_eval.py
   scripts/marker_demo.py
   scripts/calibrate_marker_range.py
+  scripts/imu_bias_relay.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -144,6 +145,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_marker_anchor test/test_marker_anchor.cpp)
   target_link_libraries(test_marker_anchor gtsam)
+
+  ament_add_gtest(test_imu_buffer test/test_imu_buffer.cpp src/fusion/imu_buffer.cpp)
+  target_include_directories(test_imu_buffer PRIVATE ${EIGEN3_INCLUDE_DIRS})
 endif()
 
 ament_package()

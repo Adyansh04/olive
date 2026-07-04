@@ -1,5 +1,8 @@
 #include "olive/fusion/fusion_node.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 #include <pcl/common/transforms.h>
 #include <pcl_conversions/pcl_conversions.h>
 
@@ -82,6 +85,13 @@ void FusionNode::declareParameters()
 
     declare_parameter("lidar_translation", std::vector<double>{ 0.0, 0.0, 0.145 });
     declare_parameter("lidar_rpy", std::vector<double>{ 0.0, 0.0, 0.0 });
+    declare_parameter("imu_rpy", std::vector<double>{ 0.0, 0.0, 0.0 });
+
+    declare_parameter("imu_init_duration_s", 1.5);
+    declare_parameter("imu_init_max_wait_s", 10.0);
+    declare_parameter("stationary_gyro_thresh_rad_s", 0.02);
+    declare_parameter("stationary_wheel_thresh_m", 0.005);
+    declare_parameter("gyro_bias_reestimate", false);
 
     declare_parameter("min_range", 0.3);
     declare_parameter("max_range", 12.0);
@@ -183,6 +193,18 @@ void FusionNode::loadConfiguration()
         static_cast<float>(rpy[0]),
         static_cast<float>(rpy[1]),
         static_cast<float>(rpy[2]));
+    const auto imu_rpy = get_parameter("imu_rpy").as_double_array();
+    imu_buffer_.setMountingRotation(
+        Eigen::Quaterniond(Eigen::AngleAxisd(imu_rpy[2], Eigen::Vector3d::UnitZ()) *
+                           Eigen::AngleAxisd(imu_rpy[1], Eigen::Vector3d::UnitY()) *
+                           Eigen::AngleAxisd(imu_rpy[0], Eigen::Vector3d::UnitX())));
+
+    imu_init_duration_s_    = get_parameter("imu_init_duration_s").as_double();
+    imu_init_max_wait_s_    = get_parameter("imu_init_max_wait_s").as_double();
+    stationary_gyro_thresh_ = get_parameter("stationary_gyro_thresh_rad_s").as_double();
+    stationary_wheel_thresh_ = get_parameter("stationary_wheel_thresh_m").as_double();
+    gyro_bias_reestimate_   = get_parameter("gyro_bias_reestimate").as_bool();
+
     preprocessor_config_.min_range = static_cast<float>(get_parameter("min_range").as_double());
     preprocessor_config_.max_range = static_cast<float>(get_parameter("max_range").as_double());
 
@@ -237,6 +259,11 @@ FusionNode::CallbackReturn FusionNode::on_configure(const rclcpp_lifecycle::Stat
     last_scan_pose_  = gtsam::Pose3();
     last_increment_  = gtsam::Pose3();
     last_scan_stamp_ = -1.0;
+
+    imu_init_done_         = false;
+    imu_init_window_start_ = -1.0;
+    imu_init_first_stamp_  = -1.0;
+    first_scan_stamp_      = -1.0;
 
     odom_pub_       = create_publisher<nav_msgs::msg::Odometry>(odom_topic_, rclcpp::QoS(10));
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
@@ -309,6 +336,10 @@ FusionNode::CallbackReturn FusionNode::on_activate(const rclcpp_lifecycle::State
             rclcpp::QoS(10),
             [this](whycode_vision::msg::WhyCodePoseArray::SharedPtr msg) { markerCallback(msg); });
 
+    if (gyro_bias_reestimate_)
+        bias_reestimate_timer_ =
+            create_wall_timer(std::chrono::seconds(1), [this]() { reestimateGyroBias(); });
+
     RCLCPP_INFO(get_logger(), "Activated");
     return CallbackReturn::SUCCESS;
 }
@@ -320,6 +351,7 @@ FusionNode::CallbackReturn FusionNode::on_deactivate(const rclcpp_lifecycle::Sta
     wheel_sub_.reset();
     marker_sub_.reset();
     vo_sub_.reset();
+    bias_reestimate_timer_.reset();
     LifecycleNode::on_deactivate(state);
     return CallbackReturn::SUCCESS;
 }
@@ -360,6 +392,112 @@ void FusionNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
         msg->linear_acceleration.y,
         msg->linear_acceleration.z);
     imu_buffer_.push(sample);
+
+    if (!imu_init_done_)
+        handleImuInit(sample.timestamp);
+}
+
+void FusionNode::handleImuInit(double stamp)
+{
+    if (imu_init_first_stamp_ < 0.0)
+        imu_init_first_stamp_ = stamp;
+    if (imu_init_window_start_ < 0.0)
+        imu_init_window_start_ = stamp;
+
+    if (stamp - imu_init_window_start_ < imu_init_duration_s_)
+    {
+        // Give up rather than deadlock: a robot that starts moving immediately
+        // still runs, just without a bias estimate.
+        if (stamp - imu_init_first_stamp_ > imu_init_max_wait_s_)
+        {
+            RCLCPP_WARN(
+                get_logger(),
+                "IMU init: no stationary window within %.1f s - proceeding with zero gyro bias",
+                imu_init_max_wait_s_);
+            imu_init_done_ = true;
+        }
+        return;
+    }
+
+    const auto stats = imu_buffer_.windowStats(imu_init_window_start_, stamp);
+
+    bool stationary = stats.count >= 10 && stats.gyro_deviation < stationary_gyro_thresh_;
+    if (stationary && wheel_buffer_.hasData())
+    {
+        const auto wheel_motion = wheel_buffer_.relativePose(imu_init_window_start_, stamp);
+        if (wheel_motion && wheel_motion->translation().norm() > stationary_wheel_thresh_)
+            stationary = false;
+    }
+
+    if (!stationary)
+    {
+        RCLCPP_WARN_THROTTLE(
+            get_logger(),
+            *get_clock(),
+            3000,
+            "IMU init: motion detected during bias window - restarting collection");
+        imu_init_window_start_ = stamp;
+        return;
+    }
+
+    imu_buffer_.setGyroBias(stats.gyro_mean);
+    imu_init_done_ = true;
+
+    // Sanity checks that catch the classic driver misconfigurations.
+    const double accel_norm = stats.accel_mean.norm();
+    if (std::abs(accel_norm - constants::GRAVITY) > 0.2 * constants::GRAVITY)
+        RCLCPP_WARN(
+            get_logger(),
+            "IMU init: |accel| = %.2f m/s^2, expected ~9.8 - check units (g vs m/s^2)",
+            accel_norm);
+    if (stats.gyro_mean.norm() > 0.05)
+        RCLCPP_WARN(
+            get_logger(),
+            "IMU init: gyro bias %.4f rad/s is unusually large - check units (deg/s vs rad/s)",
+            stats.gyro_mean.norm());
+    const double tilt =
+        std::acos(std::clamp(stats.accel_mean.normalized().z(), -1.0, 1.0)) * constants::RAD_TO_DEG;
+    if (tilt > 5.0)
+        RCLCPP_WARN(
+            get_logger(),
+            "IMU init: gravity is %.1f deg off the base +z axis - check imu_rpy mounting "
+            "rotation (or the robot is on a slope)",
+            tilt);
+
+    RCLCPP_INFO(
+        get_logger(),
+        "IMU init complete: gyro bias [%.5f %.5f %.5f] rad/s over %zu samples "
+        "(|accel| %.2f, tilt %.1f deg)",
+        stats.gyro_mean.x(),
+        stats.gyro_mean.y(),
+        stats.gyro_mean.z(),
+        stats.count,
+        accel_norm,
+        tilt);
+}
+
+void FusionNode::reestimateGyroBias()
+{
+    if (!imu_init_done_ || !imu_buffer_.hasData())
+        return;
+
+    const double now = static_cast<double>(get_clock()->now().nanoseconds()) * 1e-9;
+    const double t0  = now - 1.0;
+
+    // Only while demonstrably stationary: wheels quiet and gyro spread small.
+    if (wheel_buffer_.hasData())
+    {
+        const auto wheel_motion = wheel_buffer_.relativePose(t0, now);
+        if (!wheel_motion || wheel_motion->translation().norm() > stationary_wheel_thresh_)
+            return;
+    }
+    const auto stats = imu_buffer_.windowStats(t0, now);
+    if (stats.count < 10 || stats.gyro_deviation > stationary_gyro_thresh_)
+        return;
+
+    // Slow exponential update: tracks temperature drift without ever jumping.
+    const Eigen::Vector3d updated = 0.9 * imu_buffer_.gyroBias() + 0.1 * stats.gyro_mean;
+    imu_buffer_.setGyroBias(updated);
 }
 
 void FusionNode::wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
@@ -415,6 +553,28 @@ gtsam::Pose3 FusionNode::predictPose(double scan_stamp) const
 void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
     const auto pipeline_start = std::chrono::steady_clock::now();
+
+    // Hold scans until the IMU bias window resolves; a robot without an IMU
+    // still starts once the grace period passes.
+    if (!imu_init_done_)
+    {
+        const double stamp =
+            static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec;
+        if (first_scan_stamp_ < 0.0)
+            first_scan_stamp_ = stamp;
+        if (!imu_buffer_.hasData() && stamp - first_scan_stamp_ > imu_init_max_wait_s_)
+        {
+            RCLCPP_WARN(get_logger(), "No IMU data after %.1f s - running without gyro",
+                        imu_init_max_wait_s_);
+            imu_init_done_ = true;
+        }
+        else
+        {
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
+                                 "Waiting for IMU initialization before processing scans");
+            return;
+        }
+    }
 
     if (!preprocessor_->process(*msg, scan_image_))
         return;
