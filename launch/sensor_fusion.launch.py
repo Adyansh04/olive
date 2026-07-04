@@ -14,6 +14,7 @@ import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch_ros.actions import Node
 
 
 def launch_fusion_stack(context, *args, **kwargs):
@@ -26,8 +27,24 @@ def launch_fusion_stack(context, *args, **kwargs):
 
     modalities = config.get('modalities', {})
 
+    # The config mixes launch-level keys (modalities) with node sections, so
+    # each node receives its section as a dict rather than the raw file (the
+    # strict rcl params parser rejects non-node top-level keys).
+    def node_params(node_name):
+        return config.get(node_name, {}).get('ros__parameters', {})
+
+    def fusion_node(_config_file):
+        return Node(
+            package='olive',
+            executable='fusion_node',
+            name='fusion_node',
+            output='screen',
+            parameters=[node_params('fusion_node')],
+        )
+
     # modality -> Node factory; populated as the fusion stack lands.
-    node_registry = {}
+    # 'lio' starts the fusion core itself (the LiDAR-inertial backbone).
+    node_registry = {'lio': fusion_node}
 
     actions = []
     enabled = [name for name, on in modalities.items() if on]

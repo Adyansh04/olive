@@ -10,44 +10,61 @@
 # comes from the platform (DiffDrive in sim).
 
 modalities:
-  lio: true        # LiDAR-inertial odometry front-end        (lio_node)
+  lio: true        # LiDAR-inertial core (fusion_node backbone)
   wheel: true      # wheel-odometry factors from /odom        (fusion_node input)
   markers: true    # WhyCode fiducial position anchors        (marker_node)
   vo: false        # monocular visual odometry                (vo_node)
 
-lio_node:
-  ros__parameters:
-    use_sim_time: true
-    points_topic: /lidar/points
-    imu_topic: /imu/data
-    odom_topic: /olive/lidar_odom
-
 fusion_node:
   ros__parameters:
     use_sim_time: true
+    autostart: true          # self-configure + activate on startup
 
-    map_frame: map
+    points_topic: /lidar/points
+    imu_topic: /imu/data
+    odom_topic: /olive/odometry
+
     odom_frame: odom
     base_frame: base_link
 
-    lidar_odom_topic: /olive/lidar_odom
-    wheel_odom_topic: /odom
-    fused_odom_topic: /olive/odometry
+    # Fixed base<-lidar extrinsic (from the URDF; TF-driven on real hardware later)
+    lidar_translation: [0.0, 0.0, 0.145]
+    lidar_rpy: [0.0, 0.0, 0.0]
+
+    # Scan preprocessing
+    min_range: 0.3
+    max_range: 12.0
+
+    # Ground robot: clamp z / roll / pitch after every scan match
+    planar_motion: true
+
+    # Feature extraction (curvature window is small: 1 deg azimuth resolution)
+    curvature_window: 2
+    edge_threshold: 1.0
+    planar_threshold: 0.1
+    scan_planar_leaf_size: 0.2
+
+    # Scan-to-map matcher
+    matcher_max_iterations: 30
+    degeneracy_eigen_threshold: 100.0
 
     # Keyframe policy: a new graph pose is created when any threshold trips.
     keyframe_translation_m: 0.5
     keyframe_rotation_deg: 12.0
-    keyframe_interval_s: 1.0
+    local_map_radius_m: 25.0
+    local_map_recent_s: 10.0
+    map_edge_leaf_size: 0.1
+    map_planar_leaf_size: 0.2
 
     # iSAM2 backend
     relinearize_threshold: 0.1
     relinearize_skip: 1
 
-    # Noise sigmas, ROS order [x, y, z, roll, pitch, yaw].
-    # LIO covariance is not well calibrated -> hand-tuned here.
-    lidar_between_sigmas: [0.05, 0.05, 0.05, 0.01, 0.01, 0.02]
+    # Noise sigmas, ROS order [x, y, z, roll, pitch, yaw] (m / rad).
+    # Scan-match confidence is not well calibrated -> hand-tuned here.
+    lidar_between_sigmas: [0.01, 0.01, 0.01, 0.001, 0.001, 0.001]
     # Wheel: tight x/y (metric-scale anchor), loose yaw and z/roll/pitch
-    # (diff-drive slip enters through rotation).
+    # (slip enters through rotation). Used from the wheel stage onward.
     wheel_between_sigmas: [0.03, 0.03, 0.5, 0.5, 0.5, 0.2]
     # Soft planar prior pinning z / roll / pitch for ground motion.
     planar_prior_sigmas: [0.02, 0.009, 0.009]   # z (m), roll, pitch (rad)
