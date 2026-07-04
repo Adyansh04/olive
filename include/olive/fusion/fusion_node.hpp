@@ -1,0 +1,97 @@
+/**
+ * @file fusion_node.hpp
+ * @brief Lifecycle node running the OLIVE fusion pipeline
+ *
+ * Consumes /lidar/points and /imu/data, runs the LiDAR-inertial front-end
+ * (preprocess -> features -> scan-to-map) and maintains the keyframe factor
+ * graph. Publishes the graph estimate as odometry. Wheel, marker and visual
+ * factors attach to the same graph in later stages.
+ */
+
+#ifndef OLIVE_FUSION_FUSION_NODE_HPP_
+#define OLIVE_FUSION_FUSION_NODE_HPP_
+
+#include <memory>
+#include <nav_msgs/msg/odometry.hpp>
+#include <rclcpp_lifecycle/lifecycle_node.hpp>
+#include <rclcpp_lifecycle/lifecycle_publisher.hpp>
+#include <sensor_msgs/msg/imu.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+
+#include "olive/fusion/feature_extractor.hpp"
+#include "olive/fusion/fusion_types.hpp"
+#include "olive/fusion/imu_buffer.hpp"
+#include "olive/fusion/keyframe_map.hpp"
+#include "olive/fusion/pose_graph.hpp"
+#include "olive/fusion/scan_matcher.hpp"
+#include "olive/fusion/scan_preprocessor.hpp"
+
+namespace olive
+{
+
+class FusionNode : public rclcpp_lifecycle::LifecycleNode
+{
+public:
+    using CallbackReturn =
+        rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
+
+    explicit FusionNode(const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
+
+    CallbackReturn on_configure(const rclcpp_lifecycle::State& state) override;
+    CallbackReturn on_activate(const rclcpp_lifecycle::State& state) override;
+    CallbackReturn on_deactivate(const rclcpp_lifecycle::State& state) override;
+    CallbackReturn on_cleanup(const rclcpp_lifecycle::State& state) override;
+
+private:
+    void declareParameters();
+    void loadConfiguration();
+
+    // Hot path: one full pipeline pass per scan
+    void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
+    void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg);
+
+    void         bootstrapFirstKeyframe(const FeatureClouds& features);
+    gtsam::Pose3 predictPose(double scan_stamp) const;
+    void         publishOdometry(const gtsam::Pose3& pose, double stamp);
+
+    // Configuration
+    std::string  points_topic_;
+    std::string  imu_topic_;
+    std::string  odom_topic_;
+    std::string  odom_frame_;
+    std::string  base_frame_;
+    bool         planar_motion_ = true;
+    FactorSigmas lidar_between_sigmas_{};
+
+    PreprocessorConfig preprocessor_config_;
+    FeatureConfig      feature_config_;
+    MatcherConfig      matcher_config_;
+    KeyframeConfig     keyframe_config_;
+
+    // Pipeline modules
+    std::unique_ptr<ScanPreprocessor> preprocessor_;
+    std::unique_ptr<FeatureExtractor> feature_extractor_;
+    std::unique_ptr<ScanMatcher>      scan_matcher_;
+    std::unique_ptr<KeyframeMap>      keyframe_map_;
+    std::unique_ptr<PoseGraph>        pose_graph_;
+    ImuBuffer                         imu_buffer_;
+
+    // Per-scan state (reused buffers; hot path must not allocate)
+    ScanImage     scan_image_;
+    FeatureClouds features_;
+
+    gtsam::Pose3 last_scan_pose_;
+    gtsam::Pose3 last_increment_;
+    double       last_scan_stamp_ = -1.0;
+
+    // ROS interfaces
+    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr           points_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr                   imu_sub_;
+    rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
+    nav_msgs::msg::Odometry                                                  odom_msg_;
+    rclcpp::TimerBase::SharedPtr                                             autostart_timer_;
+};
+
+}  // namespace olive
+
+#endif  // OLIVE_FUSION_FUSION_NODE_HPP_

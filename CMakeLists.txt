@@ -8,6 +8,11 @@ if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
 endif()
 
+# The scan-matching hot path needs an optimized build; -O0 cannot hold 10 Hz.
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE RelWithDebInfo)
+endif()
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra)
 endif()
@@ -59,8 +64,24 @@ set(COMMON_DEPENDENCIES
   image_transport
 )
 
-# Fusion nodes are added here as they are implemented (lio_node, fusion_node,
-# marker_node, vo_node).
+# Node: fusion core (LiDAR-inertial front-end + keyframe factor graph)
+add_executable(fusion_node
+  src/nodes/fusion_node_main.cpp
+  src/fusion/fusion_node.cpp
+  src/fusion/imu_buffer.cpp
+  src/fusion/scan_preprocessor.cpp
+  src/fusion/feature_extractor.cpp
+  src/fusion/scan_matcher.cpp
+  src/fusion/keyframe_map.cpp
+  src/fusion/pose_graph.cpp
+)
+ament_target_dependencies(fusion_node ${COMMON_DEPENDENCIES})
+target_link_libraries(fusion_node ${PCL_LIBRARIES} gtsam)
+
+install(TARGETS
+  fusion_node
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 # Install launch files
 install(DIRECTORY
@@ -86,6 +107,9 @@ if(BUILD_TESTING)
   ament_add_gtest(test_covariance_utils test/test_covariance_utils.cpp)
   ament_target_dependencies(test_covariance_utils geometry_msgs)
   target_link_libraries(test_covariance_utils gtsam)
+
+  ament_add_gtest(test_scan_matcher test/test_scan_matcher.cpp src/fusion/scan_matcher.cpp)
+  target_link_libraries(test_scan_matcher ${PCL_LIBRARIES})
 endif()
 
 ament_package()
