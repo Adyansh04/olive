@@ -11,6 +11,7 @@
 #include <pcl/common/transforms.h>
 
 #include <Eigen/Geometry>
+#include <iostream>
 
 namespace olive
 {
@@ -70,6 +71,16 @@ bool LocalMap::addKeyframe(const ExtractedFeatures& features, const Pose3D& pose
     {
         removeOldKeyframes();
     }
+
+    // DEBUG: Log keyframe addition
+    std::cerr << "[LocalMap DEBUG] Keyframe added! "
+              << "total_keyframes=" << keyframes_.size()
+              << ", input_edges=" << features.numEdges()
+              << ", input_planars=" << features.numPlanars()
+              << ", map_edges=" << edge_map_->size()
+              << ", map_planars=" << planar_map_->size()
+              << ", pos=(" << pose.position.x() << ", " << pose.position.y() << ")"
+              << std::endl;
 
     return true;
 }

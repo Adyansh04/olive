@@ -129,6 +129,26 @@ private:
         Eigen::Matrix<double, 1, 6>& jacobian);
 
     /**
+     * @brief Debug version of computeEdgeResidual with failure reason
+     */
+    bool computeEdgeResidualDebug(
+        const pcl::PointXYZ&         point,
+        const Eigen::Matrix4f&       transform,
+        Eigen::Vector2d&             residual,
+        Eigen::Matrix<double, 2, 6>& jacobian,
+        int&                         fail_reason);
+
+    /**
+     * @brief Debug version of computePlanarResidual with failure reason
+     */
+    bool computePlanarResidualDebug(
+        const pcl::PointXYZ&         point,
+        const Eigen::Matrix4f&       transform,
+        double&                      residual,
+        Eigen::Matrix<double, 1, 6>& jacobian,
+        int&                         fail_reason);
+
+    /**
      * @brief Transform a point by the given transformation
      */
     pcl::PointXYZ transformPoint(const pcl::PointXYZ& point, const Eigen::Matrix4f& transform) const;

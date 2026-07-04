@@ -43,7 +43,7 @@ lidar_odom_node:
     # Planar features: low curvature (walls, floors)
     use_feature_registration: true
     edge_curvature_threshold: 0.1
-    planar_curvature_threshold: 0.01
+    planar_curvature_threshold: 0.05   # Relaxed from 0.01 - simulation has higher curvature noise
     max_edge_features: 400
     max_planar_features: 800
 

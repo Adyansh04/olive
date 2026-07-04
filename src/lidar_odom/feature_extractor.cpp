@@ -12,6 +12,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
+#include <limits>
 
 namespace olive
 {
@@ -38,6 +40,43 @@ ExtractedFeatures
     if (points_with_curvature.empty())
     {
         return features;
+    }
+
+    // DEBUG: Analyze curvature distribution
+    float min_curv = std::numeric_limits<float>::max();
+    float max_curv = std::numeric_limits<float>::lowest();
+    float sum_curv = 0.0f;
+    int valid_count = 0;
+    int below_planar_thresh = 0;
+    int above_edge_thresh = 0;
+    
+    for (const auto& pt : points_with_curvature)
+    {
+        if (pt.is_valid)
+        {
+            min_curv = std::min(min_curv, pt.curvature);
+            max_curv = std::max(max_curv, pt.curvature);
+            sum_curv += pt.curvature;
+            valid_count++;
+            if (pt.curvature < config_.planar_threshold)
+                below_planar_thresh++;
+            if (pt.curvature > config_.edge_threshold)
+                above_edge_thresh++;
+        }
+    }
+    
+    // Log curvature statistics (throttle in caller if needed)
+    static int log_counter = 0;
+    if (++log_counter % 100 == 1)  // Log every 100th call
+    {
+        std::cerr << "[FeatureExtractor DEBUG] Curvature stats: "
+                  << "valid=" << valid_count
+                  << ", min=" << min_curv
+                  << ", max=" << max_curv
+                  << ", avg=" << (valid_count > 0 ? sum_curv / valid_count : 0)
+                  << ", below_planar_thresh(" << config_.planar_threshold << ")=" << below_planar_thresh
+                  << ", above_edge_thresh(" << config_.edge_threshold << ")=" << above_edge_thresh
+                  << std::endl;
     }
 
     // Calculate limits

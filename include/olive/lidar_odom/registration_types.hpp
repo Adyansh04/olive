@@ -32,24 +32,24 @@ struct FeatureRegistrationConfig
     bool   is_2d_mode{ true };              ///< Constrain to (x, y, yaw) only
     double ground_height_threshold{ 0.3 };  ///< Height above ground to consider (m)
 
-    // Correspondence search
-    double edge_search_radius{ 1.0 };    ///< KNN search radius for edges (m)
-    double planar_search_radius{ 1.0 };  ///< KNN search radius for planars (m)
+    // Correspondence search - relaxed for sparse features
+    double edge_search_radius{ 2.0 };    ///< KNN search radius for edges (m) - was 1.0
+    double planar_search_radius{ 2.0 };  ///< KNN search radius for planars (m) - was 1.0
     int    edge_neighbors{ 5 };          ///< Neighbors for edge line fitting
     int    planar_neighbors{ 5 };        ///< Neighbors for plane fitting
 
-    // Outlier rejection
-    double max_edge_residual{ 0.5 };     ///< Max acceptable edge residual (m)
-    double max_planar_residual{ 0.3 };   ///< Max acceptable planar residual (m)
-    double min_eigenvalue_ratio{ 3.0 };  ///< Min ratio for valid line/plane fit
+    // Outlier rejection - relaxed for simulation
+    double max_edge_residual{ 1.0 };     ///< Max acceptable edge residual (m) - was 0.5
+    double max_planar_residual{ 0.5 };   ///< Max acceptable planar residual (m) - was 0.3
+    double min_eigenvalue_ratio{ 2.0 };  ///< Min ratio for valid line/plane fit - was 3.0
 
     // Residual weighting
     double edge_weight{ 1.0 };    ///< Weight for edge residuals
     double planar_weight{ 0.5 };  ///< Weight for planar residuals
 
-    // Minimum correspondences for valid registration
-    int min_edge_correspondences{ 10 };
-    int min_planar_correspondences{ 20 };
+    // Minimum correspondences for valid registration - relaxed
+    int min_edge_correspondences{ 5 };     ///< was 10
+    int min_planar_correspondences{ 10 };  ///< was 20
 };
 
 /**

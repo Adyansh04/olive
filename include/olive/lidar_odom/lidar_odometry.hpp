@@ -68,8 +68,15 @@ private:
 
     // === Main Processing Pipeline ===
     void processPointCloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud, double timestamp);
-
-    // === Pipeline Stages ===
+    
+    /**
+     * @brief Preprocess point cloud
+     * 
+     * Reduces point count for faster processing, removes noise and outliers.
+     *
+     * @param cloud Raw point cloud 
+     * @return Filtered and downsampled point cloud
+     */
     pcl::PointCloud<pcl::PointXYZ>::Ptr
         filterPointCloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud);
     ExtractedFeatures

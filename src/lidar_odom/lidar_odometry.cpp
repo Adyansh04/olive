@@ -289,23 +289,81 @@ void LidarOdometry::processPointCloud(
     bool               registration_success = false;
     Pose3D             reference_pose       = previous_pose_;
 
+    // Debug: Log feature registration preconditions
+    bool feat_reg_enabled = lidar_config_.use_feature_registration;
+    bool local_map_exists = (local_map_ != nullptr);
+    bool local_map_ready = local_map_exists && local_map_->isReady();
+    
+    RCLCPP_INFO_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        2000,
+        "[DEBUG] Feature reg preconditions: enabled=%d, map_exists=%d, map_ready=%d, "
+        "features: edges=%zu, planars=%zu, map_edges=%zu, map_planars=%zu",
+        feat_reg_enabled,
+        local_map_exists,
+        local_map_ready,
+        features.numEdges(),
+        features.numPlanars(),
+        local_map_exists ? local_map_->numEdgePoints() : 0,
+        local_map_exists ? local_map_->numPlanarPoints() : 0);
+
     // Try feature-based registration first (primary method)
-    if (lidar_config_.use_feature_registration && local_map_ && local_map_->isReady())
+    if (feat_reg_enabled && local_map_ready)
     {
+        RCLCPP_INFO_THROTTLE(
+            get_logger(),
+            *get_clock(),
+            2000,
+            "[DEBUG] Attempting feature registration...");
+            
         result = tryFeatureAlign(features, initial_guess);
+
+        RCLCPP_INFO_THROTTLE(
+            get_logger(),
+            *get_clock(),
+            2000,
+            "[DEBUG] Feature align result: converged=%d, fitness=%.4f, threshold=%.4f, "
+            "degenerate=%d, edge_rmse=%.4f, plane_rmse=%.4f",
+            result.converged,
+            result.fitness_score,
+            lidar_config_.fitness_threshold,
+            result.degenerate,
+            result.edge_rmse,
+            result.plane_rmse);
 
         if (result.converged && result.fitness_score < lidar_config_.fitness_threshold)
         {
             registration_success = true;
             reference_pose       = last_keyframe_pose_;  // Feature registration is relative to map
 
-            RCLCPP_DEBUG(
+            RCLCPP_INFO(
                 get_logger(),
-                "Feature registration: fitness=%.4f, edges=%d, planars=%d",
+                "Feature registration SUCCESS: fitness=%.4f, edges=%d, planars=%d",
                 result.fitness_score,
                 result.inliers_edge,
                 result.inliers_plane);
         }
+        else
+        {
+            RCLCPP_WARN_THROTTLE(
+                get_logger(),
+                *get_clock(),
+                2000,
+                "[DEBUG] Feature registration FAILED: converged=%d, fitness=%.4f > threshold=%.4f",
+                result.converged,
+                result.fitness_score,
+                lidar_config_.fitness_threshold);
+        }
+    }
+    else if (feat_reg_enabled && !local_map_ready)
+    {
+        RCLCPP_WARN_THROTTLE(
+            get_logger(),
+            *get_clock(),
+            2000,
+            "[DEBUG] Feature reg enabled but local map NOT ready! keyframes=%zu",
+            local_map_exists ? local_map_->numKeyframes() : 0);
     }
 
     // Fallback to GICP if feature registration failed
@@ -324,8 +382,10 @@ void LidarOdometry::processPointCloud(
                 reference_pose       = previous_pose_;
                 result.method        = RegistrationResult::Method::GICP;
 
-                RCLCPP_DEBUG(
+                RCLCPP_INFO_THROTTLE(
                     get_logger(),
+                    *get_clock(),
+                    5000,
                     "GICP fallback: fitness=%.4f, translation=%.3f m",
                     result.fitness_score,
                     translation_mag);
@@ -393,7 +453,7 @@ void LidarOdometry::processPointCloud(
     double pipeline_ms =
         std::chrono::duration<double, std::milli>(pipeline_end - pipeline_start).count();
 
-    RCLCPP_DEBUG_THROTTLE(
+    RCLCPP_INFO_THROTTLE(
         get_logger(),
         *get_clock(),
         5000,
@@ -480,19 +540,44 @@ RegistrationResult
 
     if (!feature_registration_ || !local_map_)
     {
+        RCLCPP_WARN_THROTTLE(
+            get_logger(),
+            *get_clock(),
+            2000,
+            "[DEBUG] tryFeatureAlign: components null - reg=%d, map=%d",
+            feature_registration_ != nullptr,
+            local_map_ != nullptr);
         return result;
     }
 
-    // Check if we have enough features
-    if (features.numEdges() < 10 && features.numPlanars() < 20)
+    // Check if we have enough features - require EITHER edges OR planars
+    // Changed from AND to OR - we can register with just edges or just planars
+    const size_t min_edges = 10;
+    const size_t min_planars = 20;
+    bool has_enough_edges = features.numEdges() >= min_edges;
+    bool has_enough_planars = features.numPlanars() >= min_planars;
+    
+    if (!has_enough_edges && !has_enough_planars)
     {
-        RCLCPP_DEBUG(
+        RCLCPP_WARN_THROTTLE(
             get_logger(),
-            "Insufficient features: edges=%zu, planars=%zu",
+            *get_clock(),
+            2000,
+            "[DEBUG] Insufficient features for registration: edges=%zu (need %zu), planars=%zu (need %zu)",
             features.numEdges(),
-            features.numPlanars());
+            min_edges,
+            features.numPlanars(),
+            min_planars);
         return result;
     }
+    
+    RCLCPP_INFO_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        2000,
+        "[DEBUG] Feature counts OK: edges=%zu, planars=%zu - proceeding with registration",
+        features.numEdges(),
+        features.numPlanars());
 
     // Perform feature-based alignment
     FeatureRegistrationResult feat_result =
@@ -641,7 +726,7 @@ void LidarOdometry::maybeAddKeyframe(const ExtractedFeatures& features, const Po
             feature_registration_->setTargetEdges(local_map_->getEdgeMap());
             feature_registration_->setTargetPlanars(local_map_->getPlanarMap());
 
-            RCLCPP_DEBUG(
+            RCLCPP_INFO(
                 get_logger(),
                 "Keyframe added: %zu keyframes, %zu edges, %zu planars in map",
                 local_map_->numKeyframes(),
@@ -650,7 +735,7 @@ void LidarOdometry::maybeAddKeyframe(const ExtractedFeatures& features, const Po
         }
     }
 
-    RCLCPP_DEBUG(
+    RCLCPP_INFO(
         get_logger(),
         "Keyframe at (%.2f, %.2f, %.2f)",
         pose.position.x(),
