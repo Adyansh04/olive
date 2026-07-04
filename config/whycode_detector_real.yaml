@@ -1,0 +1,70 @@
+# WhyCode detector configuration — REAL ROBOT TEMPLATE
+# (passed to the whycon node via its config_file parameter; the whycode
+#  package itself is never modified)
+#
+# Differences from the sim profile that matter on hardware:
+#  - pose_alpha smoothing is ON (real detections are noisy; sim disables it
+#    because the EMA lag biased anchors taken while moving)
+#  - marker diameters must match YOUR printed markers (then verify the range
+#    scale with: ros2 run olive calibrate_marker_range.py)
+#  - intrinsics come from YOUR camera calibration (distortion supported)
+
+system:
+  targets: 4                   # TODO: number of markers you deploy
+  frame_id: "whycon"
+  world_frame_id: "world"
+  process_rate_hz: 30.0
+
+detector:
+  min_size: 10
+  max_size: 10000000
+  center_distance_tolerance_ratio: 0.01
+  center_distance_tolerance_abs: 2.0
+  roundness_tolerance: 0.35
+  circularity_tolerance: 0.35
+  ratio_tolerance: 1.2
+  max_eccentricity: 0.9
+  inner_diameter: 0.12         # TODO: your printed marker (m)
+  outer_diameter: 0.20         # TODO: your printed marker (m)
+  outer_diameter_multiplier: 1.115  # TODO: calibrate with calibrate_marker_range.py
+
+identification:
+  enabled: true
+  id_bits: 6
+  id_samples: 720
+  hamming_distance: 1
+  diameter_ratio_correction: 0.45
+  variance_threshold: 0.20
+  min_marker_pixels: 20
+
+tracking:
+  max_association_dist: 10.0
+  max_unseen_frames: 10
+  id_switch_threshold: 5
+  pose_alpha: 0.2              # smoothing ON for real cameras
+  min_track_age: 0
+
+ros_interface:
+  publish_poses: true
+  publish_images: false
+  publish_tf: false            # the fusion stack owns TF
+  publish_debug_images: false
+  publish_visualization_markers: false
+  tf_frame_prefix: "whycode_"
+  parent_frame_id: "camera_link"
+  input_queue_size: 1
+  image_encoding: "rgb8"       # TODO: MUST match your camera stream
+  image_input_topic:  "/camera/image_raw"   # TODO
+  poses_output_topic: "/whycode/poses"
+  image_output_topic: "/whycon/image_out"
+  debug_images_topic: "/whycon/debug_images"
+  visualization_markers_topic: "/whycon/visualization_markers"
+  detection_enabled_service_name: "set_detection_enabled"
+
+camera:
+  package_name: "olive"
+  config_path: "config/whycode_camera_intrinsics_real.yaml"  # TODO: create
+                               # from your calibration (same format as the
+                               # sim intrinsics file; distortion supported)
+  image_width: 1280            # TODO
+  image_height: 720            # TODO

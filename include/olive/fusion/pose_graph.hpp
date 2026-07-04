@@ -70,6 +70,15 @@ public:
     void addPlanarPrior(const std::array<double, 3>& sigmas);
 
     /**
+     * @brief Close a loop: a robust between factor X(old) -> X(new)
+     *
+     * Marks the round as a global correction so the caller refreshes the
+     * keyframe map, exactly like marker anchors.
+     */
+    void addLoopFactor(size_t old_index, size_t new_index, const gtsam::Pose3& relative,
+                       double sigma);
+
+    /**
      * @brief Anchor the newest keyframe to a known marker (position only)
      * @param measured_in_camera  Detected marker position, camera frame
      * @param marker_in_world     Surveyed marker position, map frame

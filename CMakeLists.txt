@@ -83,6 +83,7 @@ add_executable(fusion_node
   src/fusion/wheel_odom_buffer.cpp
   src/fusion/marker_gate.cpp
   src/fusion/health_monitor.cpp
+  src/fusion/loop_detector.cpp
 )
 ament_target_dependencies(fusion_node ${COMMON_DEPENDENCIES} whycode_vision)
 target_link_libraries(fusion_node ${PCL_LIBRARIES} gtsam gtsam_unstable)
@@ -167,6 +168,10 @@ if(BUILD_TESTING)
   target_link_libraries(test_keyframe_map ${PCL_LIBRARIES} gtsam)
 
   ament_add_gtest(test_health_monitor test/test_health_monitor.cpp src/fusion/health_monitor.cpp)
+
+  ament_add_gtest(test_loop_detector
+    test/test_loop_detector.cpp src/fusion/loop_detector.cpp src/fusion/keyframe_map.cpp)
+  target_link_libraries(test_loop_detector ${PCL_LIBRARIES} gtsam)
 endif()
 
 ament_package()

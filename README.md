@@ -46,6 +46,32 @@ Everything lives in [config/fusion.yaml](config/fusion.yaml): modality toggles, 
 - distant markers can mis-decode with `id_valid=true` — the range gate rejects them;
 - detected range runs ~5 % long in sim (tune `outer_diameter` in the detector config).
 
+## Real-robot bring-up
+
+`config/fusion_real.yaml` and `config/whycode_detector_real.yaml` are
+hardware templates with TODO-marked calibration values. The order that works:
+
+1. **Camera intrinsics** — calibrate, save next to the detector config and
+   point `camera.config_path` at it (distortion is supported).
+2. **Extrinsics** — prefer `extrinsics_from_tf: true` with your URDF; note
+   `camera_frame` must be the frame the detector reports in (real whycode:
+   the optical convention, unlike sim).
+3. **IMU units/axes sanity** — launch and read the `IMU init` log lines: they
+   check |accel| vs 9.8 (g vs m/s²), bias magnitude (deg/s vs rad/s) and
+   gravity tilt (mounting rotation). Keep the robot stationary for the
+   `imu_init_duration_s` window after launch.
+4. **Time offsets** — read the per-sensor `stamp-to-arrival latency` startup
+   log lines; compensate via `*_time_offset_s` (LiDAR is the reference).
+5. **Detector range scale** — `ros2 run olive calibrate_marker_range.py`
+   against a marker at a surveyed position; set `outer_diameter_multiplier`.
+6. Survey marker world positions (z is in the MAP frame — origin at
+   base_link start height, not the floor) into `known_marker_positions`.
+
+Real LiDAR notes: unorganized (`height==1`) clouds need a `ring` field;
+per-point time fields (`time`/`t`/`timestamp`) enable gyro deskew.
+LiDAR dropouts are coasted on wheel odometry with `/diagnostics` reporting;
+loop closure corrects drift on revisits when markers are out of view.
+
 ## Tests
 
 ```zsh
@@ -58,4 +84,6 @@ colcon test --packages-select olive   # covariance conventions, scan matcher on
 
 - LiDAR-inertial core: 10 Hz, 6–12 ms/scan; 35 s multi-turn run **1.1 cm / 0.13°** endpoint error vs ground truth, ~1 mm stationary jitter.
 - With wheel factors + planar prior: **1.1 cm / 0.30°**, full REP-105 TF tree.
-- Marker drift reset: an 8.49 m map-frame offset snaps to **0.32 m absolute** agreement with ground truth on the first marker sighting and stays anchored, yaw error < 0.1° throughout.
+- Marker drift reset: an 8.49 m map-frame offset snaps to **0.06 m absolute** on the first marker sighting; full-trajectory ATE after anchoring: **0.061 m RMSE, max 0.113 m** (with loop closure active).
+- Loop closure: under artificially induced drift (crippled matcher, no wheel factors), an out-and-back route improves from 4.44 m to **0.39 m** final error (11×).
+- LiDAR outage (fault-injected): output and TF continue on wheel coasting with `/diagnostics` reporting, cross-track and yaw re-lock on recovery; 10-minute endurance drive with bounded cloud storage ends 1–2 cm from ground truth.

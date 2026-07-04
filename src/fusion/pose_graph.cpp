@@ -85,6 +85,20 @@ void PoseGraph::addPlanarPrior(const std::array<double, 3>& sigmas)
         gtsam::PartialPriorFactor<gtsam::Pose3>(X(num_keyframes_ - 1), indices, measured, noise));
 }
 
+void PoseGraph::addLoopFactor(
+    size_t old_index, size_t new_index, const gtsam::Pose3& relative, double sigma)
+{
+    // Robust kernel: a surviving false loop must bend, not fold, the map.
+    gtsam::Vector6 sigmas;
+    sigmas << sigma, sigma, sigma, sigma, sigma, sigma;
+    const auto noise = gtsam::noiseModel::Robust::Create(
+        gtsam::noiseModel::mEstimator::Cauchy::Create(0.1),
+        gtsam::noiseModel::Diagonal::Sigmas(sigmas));
+    pending_factors_.add(
+        gtsam::BetweenFactor<gtsam::Pose3>(X(old_index), X(new_index), relative, noise));
+    has_global_factor_ = true;
+}
+
 void PoseGraph::addMarkerAnchor(const gtsam::Point3& measured_in_camera,
                                 const gtsam::Point3& marker_in_world,
                                 const gtsam::Pose3& base_from_camera, double sigma)

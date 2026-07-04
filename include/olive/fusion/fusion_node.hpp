@@ -31,6 +31,7 @@
 #include "olive/fusion/imu_buffer.hpp"
 #include "olive/fusion/keyframe_map.hpp"
 #include "olive/fusion/health_monitor.hpp"
+#include "olive/fusion/loop_detector.hpp"
 #include "olive/fusion/marker_gate.hpp"
 #include "olive/fusion/pose_graph.hpp"
 #include "olive/fusion/scan_matcher.hpp"
@@ -72,6 +73,8 @@ private:
     void loadExtrinsicsFromTf();
     void publishDiagnostics();
     void coastTick();
+    void attemptLoopClosure(double stamp);
+    void refreshAfterCorrection();
     void logSensorLatency(const char* sensor, double stamp);
     bool markerMotionGate(double stamp);
     void reestimateGyroBias();
@@ -207,6 +210,13 @@ private:
     double        lidar_dropout_timeout_     = 1.0;
     bool          dropout_keyframes_         = false;
     double        prediction_gap_fallback_s_ = 0.5;
+
+    // Loop closure
+    std::unique_ptr<LoopDetector> loop_detector_;
+    bool   loop_closure_enabled_ = true;
+    double loop_min_interval_s_  = 5.0;
+    double loop_sigma_floor_     = 0.05;
+    double last_loop_attempt_    = -1.0;
 
     // Debug state
     nav_msgs::msg::Path             debug_path_msg_;
