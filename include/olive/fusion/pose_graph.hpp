@@ -55,6 +55,19 @@ public:
         const gtsam::Pose3& relative,
         const FactorSigmas& sigmas);
 
+    /**
+     * @brief Add an extra odometry between factor X(n-1) -> X(n) (e.g. wheels)
+     *
+     * Call after addKeyframe() and before optimize().
+     */
+    void addOdometryFactor(const gtsam::Pose3& relative, const FactorSigmas& sigmas);
+
+    /**
+     * @brief Softly pin z, roll and pitch of the newest keyframe to zero
+     * @param sigmas {z (m), roll (rad), pitch (rad)}
+     */
+    void addPlanarPrior(const std::array<double, 3>& sigmas);
+
     /// Run the incremental update; call once after adding factors for a keyframe
     void optimize();
 

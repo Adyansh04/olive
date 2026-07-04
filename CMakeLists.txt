@@ -37,6 +37,7 @@ find_package(Eigen3 REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(PCL REQUIRED COMPONENTS common io registration filters)
 find_package(GTSAM REQUIRED)
+find_package(GTSAM_UNSTABLE REQUIRED)
 
 # Include directories
 include_directories(
@@ -74,9 +75,10 @@ add_executable(fusion_node
   src/fusion/scan_matcher.cpp
   src/fusion/keyframe_map.cpp
   src/fusion/pose_graph.cpp
+  src/fusion/wheel_odom_buffer.cpp
 )
 ament_target_dependencies(fusion_node ${COMMON_DEPENDENCIES})
-target_link_libraries(fusion_node ${PCL_LIBRARIES} gtsam)
+target_link_libraries(fusion_node ${PCL_LIBRARIES} gtsam gtsam_unstable)
 
 install(TARGETS
   fusion_node

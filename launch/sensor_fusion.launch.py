@@ -34,12 +34,15 @@ def launch_fusion_stack(context, *args, **kwargs):
         return config.get(node_name, {}).get('ros__parameters', {})
 
     def fusion_node(_config_file):
+        params = dict(node_params('fusion_node'))
+        # Modality toggles flow into the core as parameters.
+        params['use_wheel_odom'] = bool(modalities.get('wheel', False))
         return Node(
             package='olive',
             executable='fusion_node',
             name='fusion_node',
             output='screen',
-            parameters=[node_params('fusion_node')],
+            parameters=[params],
         )
 
     # modality -> Node factory; populated as the fusion stack lands.

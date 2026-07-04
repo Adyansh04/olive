@@ -33,6 +33,14 @@ void FusionNode::declareParameters()
     declare_parameter("odom_topic", "/olive/odometry");
     declare_parameter("odom_frame", "odom");
     declare_parameter("base_frame", "base_link");
+    declare_parameter("map_frame", "map");
+    declare_parameter("wheel_odom_topic", "/odom");
+    declare_parameter("use_wheel_odom", true);
+    declare_parameter("use_planar_prior", true);
+    declare_parameter("publish_map_tf", true);
+    declare_parameter(
+        "wheel_between_sigmas", std::vector<double>{ 0.03, 0.03, 0.5, 0.5, 0.5, 0.2 });
+    declare_parameter("planar_prior_sigmas", std::vector<double>{ 0.02, 0.009, 0.009 });
 
     declare_parameter("lidar_translation", std::vector<double>{ 0.0, 0.0, 0.145 });
     declare_parameter("lidar_rpy", std::vector<double>{ 0.0, 0.0, 0.0 });
@@ -70,6 +78,19 @@ void FusionNode::loadConfiguration()
     odom_topic_   = get_parameter("odom_topic").as_string();
     odom_frame_   = get_parameter("odom_frame").as_string();
     base_frame_   = get_parameter("base_frame").as_string();
+    map_frame_    = get_parameter("map_frame").as_string();
+
+    wheel_odom_topic_ = get_parameter("wheel_odom_topic").as_string();
+    use_wheel_odom_   = get_parameter("use_wheel_odom").as_bool();
+    use_planar_prior_ = get_parameter("use_planar_prior").as_bool();
+    publish_map_tf_   = get_parameter("publish_map_tf").as_bool();
+
+    const auto wheel_sigmas = get_parameter("wheel_between_sigmas").as_double_array();
+    for (size_t i = 0; i < 6 && i < wheel_sigmas.size(); ++i)
+        wheel_between_sigmas_[i] = wheel_sigmas[i];
+    const auto planar_sigmas = get_parameter("planar_prior_sigmas").as_double_array();
+    for (size_t i = 0; i < 3 && i < planar_sigmas.size(); ++i)
+        planar_prior_sigmas_[i] = planar_sigmas[i];
 
     const auto translation               = get_parameter("lidar_translation").as_double_array();
     const auto rpy                       = get_parameter("lidar_rpy").as_double_array();
@@ -129,8 +150,11 @@ FusionNode::CallbackReturn FusionNode::on_configure(const rclcpp_lifecycle::Stat
     last_scan_stamp_ = -1.0;
 
     odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(odom_topic_, rclcpp::QoS(10));
+    tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
-    odom_msg_.header.frame_id = odom_frame_;
+    // The fused estimate lives in the map frame; the odom frame stays owned
+    // by the wheel odometry source (REP-105).
+    odom_msg_.header.frame_id = map_frame_;
     odom_msg_.child_frame_id  = base_frame_;
 
     RCLCPP_INFO(
@@ -154,6 +178,10 @@ FusionNode::CallbackReturn FusionNode::on_activate(const rclcpp_lifecycle::State
         imu_topic_,
         rclcpp::SensorDataQoS().keep_last(100),
         [this](sensor_msgs::msg::Imu::SharedPtr msg) { imuCallback(msg); });
+    wheel_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+        wheel_odom_topic_,
+        rclcpp::SensorDataQoS().keep_last(50),
+        [this](nav_msgs::msg::Odometry::SharedPtr msg) { wheelOdomCallback(msg); });
 
     RCLCPP_INFO(get_logger(), "Activated");
     return CallbackReturn::SUCCESS;
@@ -163,6 +191,7 @@ FusionNode::CallbackReturn FusionNode::on_deactivate(const rclcpp_lifecycle::Sta
 {
     points_sub_.reset();
     imu_sub_.reset();
+    wheel_sub_.reset();
     LifecycleNode::on_deactivate(state);
     return CallbackReturn::SUCCESS;
 }
@@ -171,7 +200,9 @@ FusionNode::CallbackReturn FusionNode::on_cleanup(const rclcpp_lifecycle::State&
 {
     points_sub_.reset();
     imu_sub_.reset();
+    wheel_sub_.reset();
     odom_pub_.reset();
+    tf_broadcaster_.reset();
     preprocessor_.reset();
     feature_extractor_.reset();
     scan_matcher_.reset();
@@ -192,6 +223,13 @@ void FusionNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
         msg->linear_acceleration.y,
         msg->linear_acceleration.z);
     imu_buffer_.push(sample);
+}
+
+void FusionNode::wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
+{
+    const double stamp =
+        static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec;
+    wheel_buffer_.push(stamp, gtsam_conversions::toGtsamPose(msg->pose.pose));
 }
 
 void FusionNode::bootstrapFirstKeyframe(const FeatureClouds& features)
@@ -278,8 +316,20 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
 
     if (keyframe_map_->shouldAddKeyframe(scan_pose))
     {
-        const gtsam::Pose3 relative = keyframe_map_->back().pose.between(scan_pose);
+        const double       previous_stamp = keyframe_map_->back().stamp;
+        const gtsam::Pose3 relative       = keyframe_map_->back().pose.between(scan_pose);
         pose_graph_->addKeyframe(scan_pose, relative, lidar_between_sigmas_);
+
+        if (use_wheel_odom_)
+        {
+            const auto wheel_relative =
+                wheel_buffer_.relativePose(previous_stamp, features_.stamp);
+            if (wheel_relative)
+                pose_graph_->addOdometryFactor(*wheel_relative, wheel_between_sigmas_);
+        }
+        if (use_planar_prior_)
+            pose_graph_->addPlanarPrior(planar_prior_sigmas_);
+
         pose_graph_->optimize();
 
         const gtsam::Pose3 optimized = pose_graph_->latestPose();
@@ -322,6 +372,29 @@ void FusionNode::publishOdometry(const gtsam::Pose3& pose, double stamp)
     odom_msg_.header.stamp = rclcpp::Time(static_cast<int64_t>(stamp * 1e9));
     odom_msg_.pose.pose    = gtsam_conversions::toRosPose(pose);
     odom_pub_->publish(odom_msg_);
+
+    if (!publish_map_tf_)
+        return;
+
+    // REP-105 split: broadcast only the map->odom correction. The continuous
+    // odom->base transform belongs to the wheel odometry source, so a global
+    // update here can never teleport the robot in the odom frame.
+    const auto wheel_pose = wheel_buffer_.poseAt(stamp);
+    if (!wheel_pose)
+        return;
+
+    const gtsam::Pose3 map_from_odom = pose * wheel_pose->inverse();
+
+    geometry_msgs::msg::TransformStamped tf;
+    tf.header.stamp            = odom_msg_.header.stamp;
+    tf.header.frame_id         = map_frame_;
+    tf.child_frame_id          = odom_frame_;
+    const auto pose_msg        = gtsam_conversions::toRosPose(map_from_odom);
+    tf.transform.translation.x = pose_msg.position.x;
+    tf.transform.translation.y = pose_msg.position.y;
+    tf.transform.translation.z = pose_msg.position.z;
+    tf.transform.rotation      = pose_msg.orientation;
+    tf_broadcaster_->sendTransform(tf);
 }
 
 }  // namespace olive
