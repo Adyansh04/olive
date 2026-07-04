@@ -9,6 +9,7 @@
 #include <Eigen/Geometry>
 #include <deque>
 #include <mutex>
+#include <vector>
 
 #include "olive/common/types.hpp"
 
@@ -53,6 +54,14 @@ public:
 
     /// Bias-corrected angular rate of the sample nearest to @p time
     Eigen::Vector3d rateNear(double time) const;
+
+    /**
+     * @brief Rotations from t0 to n+1 evenly spaced times across [t0, t1]
+     *
+     * result[k] = body rotation from t0 to t0 + k*(t1-t0)/n. Single pass
+     * under one lock — used by scan deskew on the hot path.
+     */
+    std::vector<Eigen::Quaterniond> sampleRotations(double t0, double t1, int n) const;
 
     /**
      * @brief Statistics over the samples in [t0, t1] (raw, bias-uncorrected)

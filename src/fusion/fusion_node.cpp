@@ -113,6 +113,10 @@ void FusionNode::declareParameters()
 
     declare_parameter("min_range", 0.3);
     declare_parameter("max_range", 12.0);
+    declare_parameter("point_time_field", "auto");
+    declare_parameter("ring_field", "auto");
+    declare_parameter("deskew_enabled", true);
+    declare_parameter("deskew_time_bins", 32);
 
     declare_parameter("planar_motion", true);
     declare_parameter("curvature_window", 2);
@@ -236,6 +240,10 @@ void FusionNode::loadConfiguration()
 
     preprocessor_config_.min_range = static_cast<float>(get_parameter("min_range").as_double());
     preprocessor_config_.max_range = static_cast<float>(get_parameter("max_range").as_double());
+    preprocessor_config_.point_time_field = get_parameter("point_time_field").as_string();
+    preprocessor_config_.ring_field       = get_parameter("ring_field").as_string();
+    deskew_enabled_   = get_parameter("deskew_enabled").as_bool();
+    deskew_time_bins_ = static_cast<int>(get_parameter("deskew_time_bins").as_int());
 
     planar_motion_                   = get_parameter("planar_motion").as_bool();
     feature_config_.curvature_window = static_cast<int>(get_parameter("curvature_window").as_int());
@@ -721,6 +729,23 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
         return;
 
     logSensorLatency("lidar", scan_image_.stamp);
+
+    if (deskew_enabled_ && !scan_image_.rel_time.empty() && imu_buffer_.hasData())
+    {
+        const auto [min_it, max_it] =
+            std::minmax_element(scan_image_.rel_time.begin(), scan_image_.rel_time.end());
+        const double t_min = *min_it;
+        const double t_max = *max_it;
+        if (t_max - t_min > 1e-4)  // no-op for clouds without a time field
+        {
+            deskewScan(
+                scan_image_,
+                imu_buffer_.sampleRotations(
+                    scan_image_.stamp + t_min, scan_image_.stamp + t_max, deskew_time_bins_),
+                t_min,
+                t_max);
+        }
+    }
 
     feature_extractor_->extract(scan_image_, features_);
 

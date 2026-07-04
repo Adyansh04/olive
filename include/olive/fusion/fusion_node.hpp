@@ -144,6 +144,8 @@ private:
     double stationary_gyro_thresh_ = 0.02;
     double stationary_wheel_thresh_ = 0.005;
     bool   gyro_bias_reestimate_   = false;
+    bool   deskew_enabled_         = true;
+    int    deskew_time_bins_       = 32;
 
     // Cross-sensor time offsets (lidar is the reference; corrected = msg + offset)
     double imu_time_offset_    = 0.0;

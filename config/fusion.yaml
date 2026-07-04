@@ -68,9 +68,16 @@ fusion_node:
     camera_frame: camera_link
     extrinsics_tf_timeout_s: 5.0
 
-    # Scan preprocessing
+    # Scan preprocessing. Unorganized (height==1) clouds are supported when
+    # they carry a ring field; per-point time fields (time/t/timestamp) are
+    # auto-detected and drive gyro deskew. The sim cloud is organized with no
+    # time field, so deskew is a no-op there.
     min_range: 0.3
     max_range: 12.0
+    point_time_field: auto     # auto | none | <field name>
+    ring_field: auto           # auto | <field name> (unorganized clouds)
+    deskew_enabled: true
+    deskew_time_bins: 32
 
     # Ground robot: clamp z / roll / pitch after every scan match
     planar_motion: true

@@ -10,6 +10,7 @@
 #include <pcl/point_types.h>
 
 #include <Eigen/Dense>
+#include <string>
 #include <vector>
 
 namespace olive
@@ -30,6 +31,8 @@ struct ScanImage
     Cloud::Ptr         points;      ///< Flat cloud, ring-major order
     std::vector<float> range;       ///< Range (in the sensor frame) per point
     std::vector<int>   column;      ///< Horizontal (azimuth) index per point
+    std::vector<float> rel_time;    ///< Per-point time relative to the header stamp (s);
+                                    ///< all zeros when the cloud has no time field
     std::vector<int>   ring_start;  ///< First flat index of each ring
     std::vector<int>   ring_end;    ///< One-past-last flat index of each ring
     double             stamp = 0.0;
@@ -43,6 +46,7 @@ struct ScanImage
         points->clear();
         range.clear();
         column.clear();
+        rel_time.clear();
         ring_start.clear();
         ring_end.clear();
         stamp = 0.0;
@@ -72,6 +76,11 @@ struct PreprocessorConfig
     float           min_range       = 0.3F;   ///< Points closer than this are dropped
     float           max_range       = 12.0F;  ///< Points farther than this are dropped
     Eigen::Affine3f base_from_lidar = Eigen::Affine3f::Identity();  ///< Fixed extrinsic
+
+    /// Per-point time field: "auto" detects time/t/timestamp, "none" disables
+    std::string point_time_field = "auto";
+    /// Ring source for unorganized clouds: "auto" prefers a ring field
+    std::string ring_field = "auto";
 };
 
 /**

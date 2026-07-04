@@ -106,6 +106,46 @@ Eigen::Vector3d ImuBuffer::rateNear(double time) const
     return it->angular_velocity - gyro_bias_;
 }
 
+std::vector<Eigen::Quaterniond> ImuBuffer::sampleRotations(double t0, double t1, int n) const
+{
+    std::vector<Eigen::Quaterniond> rotations;
+    rotations.reserve(static_cast<size_t>(n) + 1);
+    rotations.push_back(Eigen::Quaterniond::Identity());
+    if (n < 1 || t1 <= t0)
+        return rotations;
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    const double       dt       = (t1 - t0) / n;
+    Eigen::Quaterniond rotation = Eigen::Quaterniond::Identity();
+    double             cursor   = t0;
+    Eigen::Vector3d    last_rate = Eigen::Vector3d::Zero();
+    auto               it        = samples_.begin();
+
+    for (int k = 1; k <= n; ++k)
+    {
+        const double bin_end = t0 + k * dt;
+        while (it != samples_.end() && it->timestamp <= bin_end)
+        {
+            if (it->timestamp > cursor)
+            {
+                last_rate = it->angular_velocity - gyro_bias_;
+                rotation  = rotation * rotationFromRate(last_rate, it->timestamp - cursor);
+                cursor    = it->timestamp;
+            }
+            ++it;
+        }
+        if (bin_end > cursor)
+        {
+            // No sample up to the bin edge yet: hold the last rate.
+            rotation = rotation * rotationFromRate(last_rate, bin_end - cursor);
+            cursor   = bin_end;
+        }
+        rotations.push_back(rotation.normalized());
+    }
+    return rotations;
+}
+
 ImuBuffer::WindowStats ImuBuffer::windowStats(double t0, double t1) const
 {
     std::lock_guard<std::mutex> lock(mutex_);
