@@ -152,6 +152,11 @@ if(BUILD_TESTING)
   ament_add_gtest(test_wheel_odom_buffer
     test/test_wheel_odom_buffer.cpp src/fusion/wheel_odom_buffer.cpp)
   target_link_libraries(test_wheel_odom_buffer gtsam)
+
+  ament_add_gtest(test_scan_preprocessor
+    test/test_scan_preprocessor.cpp src/fusion/scan_preprocessor.cpp src/fusion/imu_buffer.cpp)
+  ament_target_dependencies(test_scan_preprocessor sensor_msgs)
+  target_link_libraries(test_scan_preprocessor ${PCL_LIBRARIES})
 endif()
 
 ament_package()
