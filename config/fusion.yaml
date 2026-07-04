@@ -74,7 +74,7 @@ fusion_node:
     camera_translation: [0.2, 0.0, 0.06]          # base <- camera_link (URDF)
     camera_rpy: [0.0, 0.0, 0.0]
     marker_position_sigma_m: 0.10
-    marker_stamp_window_s: 0.25
+    marker_stamp_window_s: 0.1   # tight: at 0.25 m/s a loose window smears anchors
     marker_min_range_m: 0.5
     marker_max_range_m: 6.0
     marker_min_track_frames: 3
@@ -84,11 +84,13 @@ fusion_node:
     # prior is deliberately loose in translation and yaw to allow it).
     # Values below: the maze world (markers at the corners, facing center).
     # Decoded IDs are model index + 1 (verified empirically in sim).
+    # z is in the MAP frame, whose origin is at base_link start height
+    # (0.06 m above ground) — marker centers sit 1.2 m above ground = 1.14.
     known_marker_ids: [1, 2, 3, 4]
-    known_marker_positions: [ 7.5,  7.5, 1.2,
-                             -7.5,  7.5, 1.2,
-                             -7.5, -7.5, 1.2,
-                              7.5, -7.5, 1.2]
+    known_marker_positions: [ 7.5,  7.5, 1.14,
+                             -7.5,  7.5, 1.14,
+                             -7.5, -7.5, 1.14,
+                              7.5, -7.5, 1.14]
 
     # Visual odometry input (used only when the vo modality is enabled)
     vo_topic: /olive/visual_odom
