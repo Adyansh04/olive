@@ -1,5 +1,8 @@
 #include "olive/fusion/keyframe_map.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 #include <pcl/common/transforms.h>
 
 namespace olive
@@ -22,16 +25,109 @@ void KeyframeMap::add(
     const gtsam::Pose3& pose,
     const Cloud::Ptr&   edge,
     const Cloud::Ptr&   planar,
-    double              stamp)
+    double              stamp,
+    bool                low_quality)
 {
-    keyframes_.push_back({ pose, edge, planar, stamp });
+    keyframes_.push_back({ pose, edge, planar, stamp, stamp, low_quality });
+    const size_t index = keyframes_.size() - 1;
 
     CloudPoint position;
     position.x         = static_cast<float>(pose.translation().x());
     position.y         = static_cast<float>(pose.translation().y());
     position.z         = static_cast<float>(pose.translation().z());
-    position.intensity = static_cast<float>(keyframes_.size() - 1);
+    position.intensity = static_cast<float>(index);
     keyframe_positions_->push_back(position);
+
+    if (edge)
+    {
+        cloud_bearing_.push_back(index);
+        // The FIRST (oldest) keyframe in a voxel cell claims it: old anchored
+        // clouds never churn and keep the time separation loop closure needs.
+        // Low-quality keyframes never claim, so a later good pass can. The
+        // claimed key is REMEMBERED rather than recomputed from the pose:
+        // global corrections (marker anchors, loops) move every pose, and
+        // re-keying would orphan all claims and evict the whole map.
+        if (config_.cloud_voxel > 0.0 && !low_quality)
+        {
+            const int64_t key = voxelKey(pose.translation());
+            if (voxel_owner_.emplace(key, index).second)
+                claimed_key_.emplace(index, key);
+        }
+    }
+
+    enforceCloudBudget(stamp);
+}
+
+int64_t KeyframeMap::voxelKey(const gtsam::Point3& position) const
+{
+    const auto cell = [&](double v) {
+        return static_cast<int64_t>(std::floor(v / config_.cloud_voxel)) & 0x1FFFFF;
+    };
+    return (cell(position.x()) << 42) | (cell(position.y()) << 21) | cell(position.z());
+}
+
+void KeyframeMap::enforceCloudBudget(double now)
+{
+    if (config_.cloud_voxel <= 0.0 && config_.max_cloud_keyframes == 0)
+        return;
+
+    auto evict = [this](size_t index) {
+        keyframes_[index].edge.reset();
+        keyframes_[index].planar.reset();
+        transformed_cache_.erase(index);
+    };
+    auto is_protected = [&](size_t index) {
+        return index == 0 || now - keyframes_[index].stamp <= config_.recent_window;
+    };
+    auto owns_cell = [&](size_t index) {
+        if (config_.cloud_voxel <= 0.0)
+            return true;  // voxel thinning disabled: everything "owns"
+        return claimed_key_.count(index) > 0;
+    };
+
+    // Pass 1: voxel thinning — drop clouds of non-owners once they age out
+    // of the recent window.
+    std::vector<size_t> kept;
+    kept.reserve(cloud_bearing_.size());
+    for (size_t index : cloud_bearing_)
+    {
+        if (!keyframes_[index].edge)
+            continue;  // already evicted elsewhere
+        if (!is_protected(index) && !owns_cell(index))
+            evict(index);
+        else
+            kept.push_back(index);
+    }
+    cloud_bearing_.swap(kept);
+
+    // Pass 2: hard cap as a safety net — least-recently-selected first.
+    if (config_.max_cloud_keyframes == 0 || cloud_bearing_.size() <= config_.max_cloud_keyframes)
+        return;
+
+    std::vector<size_t> candidates;
+    for (size_t index : cloud_bearing_)
+    {
+        if (!is_protected(index))
+            candidates.push_back(index);
+    }
+    std::sort(candidates.begin(), candidates.end(), [this](size_t a, size_t b) {
+        return keyframes_[a].last_selected < keyframes_[b].last_selected;
+    });
+
+    size_t to_evict = cloud_bearing_.size() - config_.max_cloud_keyframes;
+    for (size_t index : candidates)
+    {
+        if (to_evict == 0)
+            break;
+        evict(index);
+        --to_evict;
+    }
+    cloud_bearing_.erase(
+        std::remove_if(
+            cloud_bearing_.begin(),
+            cloud_bearing_.end(),
+            [this](size_t index) { return keyframes_[index].edge == nullptr; }),
+        cloud_bearing_.end());
 }
 
 bool KeyframeMap::shouldAddKeyframe(const gtsam::Pose3& pose) const
@@ -89,6 +185,9 @@ void KeyframeMap::buildLocalMap(
     {
         if (selected[i] == 0)
             continue;
+        if (!keyframes_[i].edge)
+            continue;  // clouds evicted; pose-only keyframe
+        keyframes_[i].last_selected = current_time;
 
         auto cached = transformed_cache_.find(i);
         if (cached == transformed_cache_.end())

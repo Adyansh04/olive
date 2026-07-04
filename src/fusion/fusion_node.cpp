@@ -133,6 +133,8 @@ void FusionNode::declareParameters()
     declare_parameter("local_map_recent_s", 10.0);
     declare_parameter("map_edge_leaf_size", 0.2);
     declare_parameter("map_planar_leaf_size", 0.4);
+    declare_parameter("cloud_voxel_m", 0.0);
+    declare_parameter("max_cloud_keyframes", 0);
 
     declare_parameter("publish_debug", false);
     declare_parameter("debug_path", true);
@@ -141,6 +143,21 @@ void FusionNode::declareParameters()
     declare_parameter("debug_scan_features", true);
     declare_parameter("debug_fiducials", true);
 
+    declare_parameter("optimize_budget_warn_ms", 50.0);
+
+    declare_parameter("diagnostics_period_s", 1.0);
+    declare_parameter("lidar_timeout_s", 1.0);
+    declare_parameter("imu_timeout_s", 0.5);
+    declare_parameter("wheel_timeout_s", 0.5);
+    declare_parameter("degenerate_sigma_scale", 10.0);
+    declare_parameter("match_fail_sigma_scale", 50.0);
+    declare_parameter("wheel_yaw_sigma_per_rad", 2.0);
+    declare_parameter("wheel_dist_sigma_per_m", 0.1);
+    declare_parameter("wheel_lidar_disagree_m", 0.15);
+    declare_parameter("coast_on_dropout", true);
+    declare_parameter("lidar_dropout_timeout_s", 1.0);
+    declare_parameter("dropout_keyframes", false);
+    declare_parameter("prediction_gap_wheel_fallback_s", 0.5);
     declare_parameter("relinearize_threshold", 0.1);
     declare_parameter("relinearize_skip", 1);
     declare_parameter(
@@ -268,6 +285,29 @@ void FusionNode::loadConfiguration()
         static_cast<float>(get_parameter("map_edge_leaf_size").as_double());
     keyframe_config_.planar_leaf_size =
         static_cast<float>(get_parameter("map_planar_leaf_size").as_double());
+    keyframe_config_.cloud_voxel = get_parameter("cloud_voxel_m").as_double();
+    keyframe_config_.max_cloud_keyframes =
+        static_cast<size_t>(std::max<int64_t>(0, get_parameter("max_cloud_keyframes").as_int()));
+
+    optimize_budget_warn_ms_ = get_parameter("optimize_budget_warn_ms").as_double();
+
+    degenerate_sigma_scale_    = get_parameter("degenerate_sigma_scale").as_double();
+    match_fail_sigma_scale_    = get_parameter("match_fail_sigma_scale").as_double();
+    wheel_yaw_sigma_per_rad_   = get_parameter("wheel_yaw_sigma_per_rad").as_double();
+    wheel_dist_sigma_per_m_    = get_parameter("wheel_dist_sigma_per_m").as_double();
+    wheel_lidar_disagree_m_    = get_parameter("wheel_lidar_disagree_m").as_double();
+    coast_on_dropout_          = get_parameter("coast_on_dropout").as_bool();
+    lidar_dropout_timeout_     = get_parameter("lidar_dropout_timeout_s").as_double();
+    dropout_keyframes_         = get_parameter("dropout_keyframes").as_bool();
+    prediction_gap_fallback_s_ = get_parameter("prediction_gap_wheel_fallback_s").as_double();
+
+    health_monitor_.configure({
+        { "lidar", get_parameter("lidar_timeout_s").as_double() },
+        { "imu", get_parameter("imu_timeout_s").as_double() },
+        { "wheel", get_parameter("wheel_timeout_s").as_double() },
+        { "markers", 0.0 },  // optional sources: age-reported, never FAILED
+        { "vo", 0.0 },
+    });
 
     debug_enabled_       = get_parameter("publish_debug").as_bool();
     debug_path_          = get_parameter("debug_path").as_bool();
@@ -321,9 +361,12 @@ FusionNode::CallbackReturn FusionNode::on_configure(const rclcpp_lifecycle::Stat
         create_publisher<sensor_msgs::msg::PointCloud2>("/olive/debug/scan_planars", rclcpp::QoS(1));
     debug_fiducials_pub_ =
         create_publisher<visualization_msgs::msg::MarkerArray>("/olive/debug/fiducials", latched);
+    diagnostics_pub_ =
+        create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", rclcpp::QoS(10));
 
     debug_path_msg_.poses.clear();
     debug_path_msg_.header.frame_id = map_frame_;
+    debug_keyframes_msg_.poses.clear();
     anchor_event_times_.clear();
     last_edge_map_.reset();
     last_planar_map_.reset();
@@ -377,6 +420,13 @@ FusionNode::CallbackReturn FusionNode::on_activate(const rclcpp_lifecycle::State
         bias_reestimate_timer_ =
             create_wall_timer(std::chrono::seconds(1), [this]() { reestimateGyroBias(); });
 
+    diagnostics_timer_ = create_wall_timer(
+        std::chrono::duration<double>(get_parameter("diagnostics_period_s").as_double()),
+        [this]() { publishDiagnostics(); });
+    if (coast_on_dropout_)
+        coast_timer_ =
+            create_wall_timer(std::chrono::milliseconds(200), [this]() { coastTick(); });
+
     RCLCPP_INFO(get_logger(), "Activated");
     return CallbackReturn::SUCCESS;
 }
@@ -389,6 +439,8 @@ FusionNode::CallbackReturn FusionNode::on_deactivate(const rclcpp_lifecycle::Sta
     marker_sub_.reset();
     vo_sub_.reset();
     bias_reestimate_timer_.reset();
+    diagnostics_timer_.reset();
+    coast_timer_.reset();
     LifecycleNode::on_deactivate(state);
     return CallbackReturn::SUCCESS;
 }
@@ -424,6 +476,7 @@ void FusionNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
         static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec +
         imu_time_offset_;
     logSensorLatency("imu", sample.timestamp);
+    health_monitor_.beat("imu", sample.timestamp);
     sample.angular_velocity =
         Eigen::Vector3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
     sample.linear_acceleration = Eigen::Vector3d(
@@ -650,6 +703,7 @@ void FusionNode::wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
     const double stamp = static_cast<double>(msg->header.stamp.sec) +
                          1e-9 * msg->header.stamp.nanosec + wheel_time_offset_;
     logSensorLatency("wheel", stamp);
+    health_monitor_.beat("wheel", stamp);
     wheel_buffer_.push(stamp, gtsam_conversions::toGtsamPose(msg->pose.pose));
 }
 
@@ -658,6 +712,7 @@ void FusionNode::markerCallback(const whycode_vision::msg::WhyCodePoseArray::Sha
     const double stamp = static_cast<double>(msg->header.stamp.sec) +
                          1e-9 * msg->header.stamp.nanosec + camera_time_offset_;
     logSensorLatency("camera", stamp);
+    health_monitor_.beat("markers", stamp);
     if (!markerMotionGate(stamp))
         return;
     for (const auto& detection : msg->poses)
@@ -675,7 +730,11 @@ void FusionNode::bootstrapFirstKeyframe(const FeatureClouds& features)
 {
     const gtsam::Pose3 origin;
     pose_graph_->addFirstKeyframe(origin);
-    pose_graph_->optimize();
+    if (pose_graph_->optimize() == PoseGraph::OptimizeResult::FAILED)
+    {
+        RCLCPP_ERROR(get_logger(), "Bootstrap graph update failed - retrying on the next scan");
+        return;
+    }
 
     Cloud::Ptr edge_copy(new Cloud(*features.edge));
     Cloud::Ptr planar_copy(new Cloud(*features.planar));
@@ -687,9 +746,28 @@ void FusionNode::bootstrapFirstKeyframe(const FeatureClouds& features)
 
 gtsam::Pose3 FusionNode::predictPose(double scan_stamp) const
 {
-    // Constant-velocity translation prediction with the rotation replaced by
-    // integrated gyro rates when available.
+    // After a scan gap (sensor outage), the constant-velocity increment is
+    // stale garbage — the wheel-measured motion over the gap replaces it.
+    if (last_scan_stamp_ > 0.0 && scan_stamp - last_scan_stamp_ > prediction_gap_fallback_s_)
+    {
+        const auto wheel_relative = wheel_buffer_.relativePose(last_scan_stamp_, scan_stamp);
+        if (wheel_relative)
+            return last_scan_pose_ * (*wheel_relative);
+    }
+
+    // Translation prediction comes from the wheels when they cover the
+    // interval — the platform's own velocity truth. A constant-velocity
+    // extrapolation is only the fallback: in weakly-observable scenes
+    // (corridors) the matcher cannot correct along the degenerate axis, so
+    // an extrapolated guess feeds back into the estimate and pumps a
+    // translation runaway. Rotation comes from the gyro either way.
     gtsam::Pose3 increment = last_increment_;
+    if (last_scan_stamp_ > 0.0)
+    {
+        const auto wheel_relative = wheel_buffer_.relativePose(last_scan_stamp_, scan_stamp);
+        if (wheel_relative)
+            increment = *wheel_relative;
+    }
     if (imu_buffer_.hasData() && last_scan_stamp_ > 0.0)
     {
         const Eigen::Quaterniond gyro_rotation =
@@ -729,6 +807,7 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
         return;
 
     logSensorLatency("lidar", scan_image_.stamp);
+    health_monitor_.beat("lidar", scan_image_.stamp);
 
     if (deskew_enabled_ && !scan_image_.rel_time.empty() && imu_buffer_.hasData())
     {
@@ -768,7 +847,13 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
     MatcherPose matcher_pose =
         MatcherPose::fromAffine(Eigen::Affine3f(guess.matrix().cast<float>()));
     gtsam::Pose3 scan_pose = guess;
-    if (scan_matcher_->align(features_, matcher_pose))
+    last_match_ok_         = scan_matcher_->align(features_, matcher_pose);
+    last_match_degenerate_ = scan_matcher_->isDegenerate();
+    if (last_match_ok_ && last_match_degenerate_)
+        health_monitor_.flagQuality("lidar", SensorHealth::DEGRADED, "degenerate geometry");
+    else if (!last_match_ok_)
+        health_monitor_.flagQuality("lidar", SensorHealth::POOR, "scan match failed");
+    if (last_match_ok_)
     {
         if (planar_motion_)
         {
@@ -786,10 +871,7 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
     else
     {
         RCLCPP_WARN_THROTTLE(
-            get_logger(),
-            *get_clock(),
-            5000,
-            "Scan matching failed; coasting on prediction");
+            get_logger(), *get_clock(), 5000, "Scan matching failed; coasting on prediction");
     }
 
     last_increment_  = last_scan_pose_.between(scan_pose);
@@ -800,13 +882,65 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
     {
         const double       previous_stamp = keyframe_map_->back().stamp;
         const gtsam::Pose3 relative       = keyframe_map_->back().pose.between(scan_pose);
-        pose_graph_->addKeyframe(scan_pose, relative, lidar_between_sigmas_);
+
+        // A dead-reckoned or degenerate keyframe must not carry the tight
+        // scan-match confidence, or it silently corrupts the graph.
+        double lidar_scale = !last_match_ok_
+                                 ? match_fail_sigma_scale_
+                                 : (last_match_degenerate_ ? degenerate_sigma_scale_ : 1.0);
+
+        const auto wheel_relative =
+            use_wheel_odom_ ? wheel_buffer_.relativePose(previous_stamp, features_.stamp)
+                            : std::nullopt;
+
+        // Eigenvalue thresholds are scene-dependent; the wheels are a direct
+        // witness. A scan match claiming substantially MORE or LESS motion
+        // than the wheels measured loses its authority no matter what the
+        // eigenvalues said. Only the distance is compared — direction
+        // differences at turn keyframes are yaw effects the wheel factor
+        // already handles, and vector comparison false-fires on them.
+        bool wheel_disagrees = false;
+        if (wheel_relative)
+        {
+            const double distance_gap = std::abs(
+                relative.translation().norm() - wheel_relative->translation().norm());
+            if (distance_gap > wheel_lidar_disagree_m_)
+            {
+                wheel_disagrees = true;
+                lidar_scale     = std::max(lidar_scale, degenerate_sigma_scale_);
+                health_monitor_.flagQuality(
+                    "lidar", SensorHealth::DEGRADED, "disagrees with wheel odometry");
+                RCLCPP_WARN_THROTTLE(
+                    get_logger(), *get_clock(), 5000,
+                    "Scan match distance disagrees with wheels by %.2f m - "
+                    "widening the LiDAR factor",
+                    distance_gap);
+            }
+        }
+
+        FactorSigmas lidar_sigmas = lidar_between_sigmas_;
+        for (double& sigma : lidar_sigmas) sigma *= lidar_scale;
+        pose_graph_->addKeyframe(scan_pose, relative, lidar_sigmas);
 
         if (use_wheel_odom_)
         {
-            const auto wheel_relative = wheel_buffer_.relativePose(previous_stamp, features_.stamp);
             if (wheel_relative)
-                pose_graph_->addOdometryFactor(*wheel_relative, wheel_between_sigmas_);
+            {
+                // Slip enters through rotation: widen the wheel factor with
+                // the turning and distance actually covered this interval.
+                const double turn = std::abs(
+                    Eigen::AngleAxisd(
+                        imu_buffer_.relativeRotation(previous_stamp, features_.stamp))
+                        .angle());
+                const double dist = wheel_relative->translation().norm();
+
+                FactorSigmas wheel_sigmas = wheel_between_sigmas_;
+                wheel_sigmas[5] *= 1.0 + wheel_yaw_sigma_per_rad_ * turn;
+                wheel_sigmas[0] *= 1.0 + wheel_dist_sigma_per_m_ * dist +
+                                   wheel_yaw_sigma_per_rad_ * turn;
+                wheel_sigmas[1] = wheel_sigmas[0];
+                pose_graph_->addOdometryFactor(*wheel_relative, wheel_sigmas);
+            }
         }
         if (use_vo_)
         {
@@ -835,12 +969,36 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
             }
         }
 
-        const bool corrected = pose_graph_->optimize();
+        const auto optimize_start = std::chrono::steady_clock::now();
+        const auto result         = pose_graph_->optimize();
+        const double optimize_ms =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                      optimize_start)
+                .count();
+        if (optimize_ms > optimize_budget_warn_ms_)
+            RCLCPP_WARN(
+                get_logger(), "Graph update took %.1f ms (budget %.0f ms)", optimize_ms,
+                optimize_budget_warn_ms_);
+
+        if (result == PoseGraph::OptimizeResult::FAILED)
+        {
+            // The keyframe was rolled back; keep publishing the scan-matched
+            // pose and try again at the next keyframe trigger.
+            RCLCPP_ERROR_THROTTLE(
+                get_logger(), *get_clock(), 5000,
+                "Graph update failed - keyframe discarded, coasting on scan matching");
+            publishOdometry(last_scan_pose_, features_.stamp);
+            publishScanDebug(features_.stamp);
+            return;
+        }
+        const bool corrected = result == PoseGraph::OptimizeResult::CORRECTED;
 
         const gtsam::Pose3 optimized = pose_graph_->latestPose();
         Cloud::Ptr         edge_copy(new Cloud(*features_.edge));
         Cloud::Ptr         planar_copy(new Cloud(*features_.planar));
-        keyframe_map_->add(optimized, edge_copy, planar_copy, features_.stamp);
+        keyframe_map_->add(
+            optimized, edge_copy, planar_copy, features_.stamp,
+            !last_match_ok_ || last_match_degenerate_ || wheel_disagrees);
 
         if (corrected)
         {
@@ -884,6 +1042,104 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
         static_cast<double>(scan_matcher_->constraintEigenvalues()(1)),
         static_cast<double>(scan_matcher_->constraintEigenvalues()(2)),
         pipeline_ms);
+}
+
+void FusionNode::publishDiagnostics()
+{
+    if (!diagnostics_pub_ || !diagnostics_pub_->is_activated())
+        return;
+
+    const double now = static_cast<double>(get_clock()->now().nanoseconds()) * 1e-9;
+
+    diagnostic_msgs::msg::DiagnosticArray array;
+    array.header.stamp = get_clock()->now();
+
+    for (const auto& status : health_monitor_.evaluate(now))
+    {
+        diagnostic_msgs::msg::DiagnosticStatus diag;
+        diag.name        = "olive/" + status.name;
+        diag.hardware_id = status.name;
+
+        switch (status.health)
+        {
+            case SensorHealth::FAILED:
+                diag.level   = diagnostic_msgs::msg::DiagnosticStatus::ERROR;
+                diag.message = status.age < 0.0 ? "no data" : "timed out";
+                break;
+            case SensorHealth::POOR:
+            case SensorHealth::DEGRADED:
+                diag.level   = diagnostic_msgs::msg::DiagnosticStatus::WARN;
+                diag.message = status.detail.empty() ? "degraded" : status.detail;
+                break;
+            default:
+                diag.level   = diagnostic_msgs::msg::DiagnosticStatus::OK;
+                diag.message = "ok";
+        }
+
+        diagnostic_msgs::msg::KeyValue age;
+        age.key   = "age_s";
+        age.value = std::to_string(status.age);
+        diag.values.push_back(age);
+
+        if (status.name == "lidar" && scan_matcher_)
+        {
+            diagnostic_msgs::msg::KeyValue eig;
+            eig.key = "constraint_eigenvalues";
+            const auto& values = scan_matcher_->constraintEigenvalues();
+            eig.value = std::to_string(values(0)) + " " + std::to_string(values(1)) + " " +
+                        std::to_string(values(2));
+            diag.values.push_back(eig);
+        }
+        array.status.push_back(diag);
+    }
+    diagnostics_pub_->publish(array);
+}
+
+void FusionNode::coastTick()
+{
+    // Keep the output and TF alive on wheel dead-reckoning while the LiDAR
+    // is silent; the graph itself is left untouched (tier-1 coasting).
+    if (last_scan_stamp_ < 0.0 || !wheel_buffer_.hasData())
+        return;
+    const double wheel_now = wheel_buffer_.latestStamp();
+    if (wheel_now - last_scan_stamp_ < lidar_dropout_timeout_)
+        return;
+
+    const auto wheel_relative = wheel_buffer_.relativePose(last_scan_stamp_, wheel_now);
+    if (!wheel_relative)
+        return;
+
+    RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 5000,
+        "No LiDAR for %.1f s - coasting on wheel odometry", wheel_now - last_scan_stamp_);
+    const gtsam::Pose3 coast_pose = last_scan_pose_ * (*wheel_relative);
+    publishOdometry(coast_pose, wheel_now);
+
+    // Tier 2 (optional): wheel-paced keyframes so marker anchors can still
+    // land during the outage.
+    if (dropout_keyframes_ && !keyframe_map_->empty() &&
+        keyframe_map_->shouldAddKeyframe(coast_pose))
+    {
+        const double previous_stamp = keyframe_map_->back().stamp;
+        const auto   keyframe_relative =
+            wheel_buffer_.relativePose(previous_stamp, wheel_now);
+        if (!keyframe_relative)
+            return;
+
+        pose_graph_->addKeyframe(coast_pose, *keyframe_relative, wheel_between_sigmas_);
+        if (use_planar_prior_)
+            pose_graph_->addPlanarPrior(planar_prior_sigmas_);
+        if (pose_graph_->optimize() == PoseGraph::OptimizeResult::FAILED)
+        {
+            RCLCPP_ERROR_THROTTLE(
+                get_logger(), *get_clock(), 5000, "Coast keyframe rejected by the graph");
+            return;
+        }
+        keyframe_map_->add(
+            pose_graph_->latestPose(), nullptr, nullptr, wheel_now, /*low_quality=*/true);
+        last_scan_pose_  = pose_graph_->latestPose();
+        last_scan_stamp_ = wheel_now;
+    }
 }
 
 namespace
@@ -936,12 +1192,23 @@ void FusionNode::publishKeyframeDebug(bool trajectory_corrected, double stamp)
 
     if (debug_keyframes_)
     {
-        geometry_msgs::msg::PoseArray array;
-        array.header.frame_id = map_frame_;
-        array.header.stamp    = ros_stamp;
-        for (const gtsam::Pose3& pose : pose_graph_->allPoses())
-            array.poses.push_back(gtsam_conversions::toRosPose(pose));
-        debug_keyframes_pub_->publish(array);
+        // Incrementally appended; rebuilt only when past poses moved — a
+        // full allPoses() sweep per keyframe would defeat the incremental
+        // graph query path.
+        if (trajectory_corrected)
+        {
+            debug_keyframes_msg_.poses.clear();
+            for (const gtsam::Pose3& pose : pose_graph_->allPoses())
+                debug_keyframes_msg_.poses.push_back(gtsam_conversions::toRosPose(pose));
+        }
+        else
+        {
+            debug_keyframes_msg_.poses.push_back(
+                gtsam_conversions::toRosPose(pose_graph_->latestPose()));
+        }
+        debug_keyframes_msg_.header.frame_id = map_frame_;
+        debug_keyframes_msg_.header.stamp    = ros_stamp;
+        debug_keyframes_pub_->publish(debug_keyframes_msg_);
     }
 
     if (debug_local_map_ && last_edge_map_ && last_planar_map_)

@@ -13,6 +13,7 @@
 
 #include <tf2_ros/transform_broadcaster.h>
 
+#include <diagnostic_msgs/msg/diagnostic_array.hpp>
 #include <geometry_msgs/msg/pose_array.hpp>
 #include <memory>
 #include <nav_msgs/msg/odometry.hpp>
@@ -29,6 +30,7 @@
 #include "olive/fusion/fusion_types.hpp"
 #include "olive/fusion/imu_buffer.hpp"
 #include "olive/fusion/keyframe_map.hpp"
+#include "olive/fusion/health_monitor.hpp"
 #include "olive/fusion/marker_gate.hpp"
 #include "olive/fusion/pose_graph.hpp"
 #include "olive/fusion/scan_matcher.hpp"
@@ -68,6 +70,8 @@ private:
     // IMU startup initialization (gyro bias + sanity checks; gates scans)
     void handleImuInit(double stamp);
     void loadExtrinsicsFromTf();
+    void publishDiagnostics();
+    void coastTick();
     void logSensorLatency(const char* sensor, double stamp);
     bool markerMotionGate(double stamp);
     void reestimateGyroBias();
@@ -183,9 +187,30 @@ private:
     nav_msgs::msg::Odometry      odom_msg_;
     rclcpp::TimerBase::SharedPtr autostart_timer_;
     rclcpp::TimerBase::SharedPtr bias_reestimate_timer_;
+    rclcpp::TimerBase::SharedPtr diagnostics_timer_;
+    rclcpp::TimerBase::SharedPtr coast_timer_;
+    rclcpp_lifecycle::LifecyclePublisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr
+        diagnostics_pub_;
+
+    double optimize_budget_warn_ms_ = 50.0;
+
+    // Health / degradation
+    HealthMonitor health_monitor_;
+    bool          last_match_ok_             = true;
+    bool          last_match_degenerate_     = false;
+    double        degenerate_sigma_scale_    = 10.0;
+    double        match_fail_sigma_scale_    = 50.0;
+    double        wheel_yaw_sigma_per_rad_   = 2.0;
+    double        wheel_dist_sigma_per_m_    = 0.1;
+    double        wheel_lidar_disagree_m_    = 0.15;
+    bool          coast_on_dropout_          = true;
+    double        lidar_dropout_timeout_     = 1.0;
+    bool          dropout_keyframes_         = false;
+    double        prediction_gap_fallback_s_ = 0.5;
 
     // Debug state
     nav_msgs::msg::Path             debug_path_msg_;
+    geometry_msgs::msg::PoseArray   debug_keyframes_msg_;
     Cloud                           debug_scan_cloud_;    ///< reused transform buffer
     std::unordered_map<int, double> anchor_event_times_;  ///< marker id -> last anchor stamp
     Cloud::Ptr                      last_edge_map_;

@@ -28,14 +28,14 @@ using Cloud      = pcl::PointCloud<CloudPoint>;
  */
 struct ScanImage
 {
-    Cloud::Ptr         points;      ///< Flat cloud, ring-major order
-    std::vector<float> range;       ///< Range (in the sensor frame) per point
-    std::vector<int>   column;      ///< Horizontal (azimuth) index per point
-    std::vector<float> rel_time;    ///< Per-point time relative to the header stamp (s);
-                                    ///< all zeros when the cloud has no time field
-    std::vector<int>   ring_start;  ///< First flat index of each ring
-    std::vector<int>   ring_end;    ///< One-past-last flat index of each ring
-    double             stamp = 0.0;
+    Cloud::Ptr         points;    ///< Flat cloud, ring-major order
+    std::vector<float> range;     ///< Range (in the sensor frame) per point
+    std::vector<int>   column;    ///< Horizontal (azimuth) index per point
+    std::vector<float> rel_time;  ///< Per-point time relative to the header stamp (s);
+                                  ///< all zeros when the cloud has no time field
+    std::vector<int> ring_start;  ///< First flat index of each ring
+    std::vector<int> ring_end;    ///< One-past-last flat index of each ring
+    double           stamp = 0.0;
 
     ScanImage()
       : points(new Cloud)
@@ -124,6 +124,12 @@ struct KeyframeConfig
     double recent_window        = 10.0;  ///< Keyframes newer than this always join (s)
     float  edge_leaf_size       = 0.2F;  ///< Local-map voxel size, edge cloud (m)
     float  planar_leaf_size     = 0.4F;  ///< Local-map voxel size, planar cloud (m)
+
+    /// Cloud-storage bounds (0 = unbounded). Outside the recent window at
+    /// most one keyframe per cloud_voxel cell keeps its clouds; the LRU cap
+    /// is a safety net on top.
+    double cloud_voxel         = 0.0;  ///< m; ~2-3x keyframe spacing
+    size_t max_cloud_keyframes = 0;
 };
 
 }  // namespace olive

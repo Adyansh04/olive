@@ -82,14 +82,31 @@ public:
         const gtsam::Pose3&  base_from_camera,
         double               sigma);
 
+    /// Outcome of one incremental update round
+    enum class OptimizeResult
+    {
+        OK,         ///< factors applied; only the newest pose moved meaningfully
+        CORRECTED,  ///< a global factor bent past poses — refresh caches
+        FAILED      ///< the update threw; pending work was rolled back
+    };
+
     /**
      * @brief Run the incremental update; call once after adding factors
-     * @return true when a global (anchor) factor was applied this round —
-     *         past keyframe poses may have moved and caches need refreshing
+     *
+     * On FAILED the pending factors/values are discarded and the keyframe
+     * count rolls back to the last committed state, so the caller must skip
+     * the keyframe entirely (an indeterminate system must not kill the node).
      */
-    bool optimize();
+    OptimizeResult optimize();
 
-    /// Latest optimized pose of keyframe @p index
+    /**
+     * @brief Optimized pose of keyframe @p index
+     *
+     * Reads the cached full estimate, which is refreshed only when a global
+     * correction occurs (matching the KeyframeMap pose-refresh semantics);
+     * between corrections, past poses are stale by design. The newest pose
+     * is always current via latestPose().
+     */
     gtsam::Pose3 pose(size_t index) const;
 
     /// Latest optimized pose of the newest keyframe
@@ -106,8 +123,9 @@ private:
     gtsam::NonlinearFactorGraph pending_factors_;
     gtsam::Values               pending_values_;
     gtsam::Values               current_estimate_;
-    size_t                      num_keyframes_     = 0;
-    bool                        has_global_factor_ = false;
+    size_t                      num_keyframes_      = 0;
+    size_t                      committed_keyframes_ = 0;
+    bool                        has_global_factor_  = false;
 };
 
 }  // namespace olive

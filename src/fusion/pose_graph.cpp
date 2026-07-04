@@ -98,24 +98,42 @@ void PoseGraph::addMarkerAnchor(const gtsam::Point3& measured_in_camera,
     has_global_factor_ = true;
 }
 
-bool PoseGraph::optimize()
+PoseGraph::OptimizeResult PoseGraph::optimize()
 {
-    isam_.update(pending_factors_, pending_values_);
-    isam_.update();
-
     const bool corrected = has_global_factor_;
-    if (corrected)
+    has_global_factor_   = false;
+
+    try
     {
-        // An anchor bends the whole recent trajectory; extra relinearization
-        // rounds let the correction propagate through the graph.
-        for (int i = 0; i < 5; ++i) isam_.update();
-        has_global_factor_ = false;
+        isam_.update(pending_factors_, pending_values_);
+        isam_.update();
+        if (corrected)
+        {
+            // An anchor bends the whole recent trajectory; extra
+            // relinearization rounds let the correction propagate.
+            for (int i = 0; i < 5; ++i) isam_.update();
+        }
+    }
+    catch (const std::exception&)
+    {
+        // Indeterminate/degenerate systems must not kill the node: discard
+        // the pending work and roll back to the last committed keyframe.
+        pending_factors_.resize(0);
+        pending_values_.clear();
+        num_keyframes_ = committed_keyframes_;
+        return OptimizeResult::FAILED;
     }
 
     pending_factors_.resize(0);
     pending_values_.clear();
-    current_estimate_ = isam_.calculateEstimate();
-    return corrected;
+    committed_keyframes_ = num_keyframes_;
+
+    // The full estimate is only needed when past poses moved; the common
+    // path stays incremental (see pose() staleness contract).
+    if (corrected || current_estimate_.empty())
+        current_estimate_ = isam_.calculateBestEstimate();
+
+    return corrected ? OptimizeResult::CORRECTED : OptimizeResult::OK;
 }
 
 gtsam::Pose3 PoseGraph::pose(size_t index) const
@@ -123,7 +141,12 @@ gtsam::Pose3 PoseGraph::pose(size_t index) const
     return current_estimate_.at<gtsam::Pose3>(X(index));
 }
 
-gtsam::Pose3 PoseGraph::latestPose() const { return pose(num_keyframes_ - 1); }
+gtsam::Pose3 PoseGraph::latestPose() const
+{
+    // Single-key query: retracts by the same delta the full estimate uses,
+    // without materializing every pose.
+    return isam_.calculateEstimate<gtsam::Pose3>(X(num_keyframes_ - 1));
+}
 
 gtsam::Matrix PoseGraph::latestCovariance() const
 {

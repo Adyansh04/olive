@@ -44,6 +44,12 @@ bool WheelOdomBuffer::hasData() const
     return !samples_.empty();
 }
 
+double WheelOdomBuffer::latestStamp() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return samples_.empty() ? -1.0 : samples_.back().first;
+}
+
 std::optional<gtsam::Pose3> WheelOdomBuffer::interpolate(double time) const
 {
     if (samples_.empty())

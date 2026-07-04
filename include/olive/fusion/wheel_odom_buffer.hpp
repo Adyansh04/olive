@@ -44,6 +44,9 @@ public:
 
     bool hasData() const;
 
+    /// Timestamp of the newest sample (-1 when empty)
+    double latestStamp() const;
+
 private:
     /// Requires the lock to be held
     std::optional<gtsam::Pose3> interpolate(double time) const;

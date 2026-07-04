@@ -30,6 +30,7 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2_eigen REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
+find_package(diagnostic_msgs REQUIRED)
 find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(cv_bridge REQUIRED)
@@ -62,6 +63,7 @@ set(COMMON_DEPENDENCIES
   tf2_eigen
   tf2_geometry_msgs
   visualization_msgs
+  diagnostic_msgs
   pcl_ros
   pcl_conversions
   cv_bridge
@@ -80,6 +82,7 @@ add_executable(fusion_node
   src/fusion/pose_graph.cpp
   src/fusion/wheel_odom_buffer.cpp
   src/fusion/marker_gate.cpp
+  src/fusion/health_monitor.cpp
 )
 ament_target_dependencies(fusion_node ${COMMON_DEPENDENCIES} whycode_vision)
 target_link_libraries(fusion_node ${PCL_LIBRARIES} gtsam gtsam_unstable)
@@ -124,6 +127,8 @@ install(PROGRAMS
   scripts/marker_demo.py
   scripts/calibrate_marker_range.py
   scripts/imu_bias_relay.py
+  scripts/endurance_test.py
+  scripts/lidar_gate_relay.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -157,6 +162,11 @@ if(BUILD_TESTING)
     test/test_scan_preprocessor.cpp src/fusion/scan_preprocessor.cpp src/fusion/imu_buffer.cpp)
   ament_target_dependencies(test_scan_preprocessor sensor_msgs)
   target_link_libraries(test_scan_preprocessor ${PCL_LIBRARIES})
+
+  ament_add_gtest(test_keyframe_map test/test_keyframe_map.cpp src/fusion/keyframe_map.cpp)
+  target_link_libraries(test_keyframe_map ${PCL_LIBRARIES} gtsam)
+
+  ament_add_gtest(test_health_monitor test/test_health_monitor.cpp src/fusion/health_monitor.cpp)
 endif()
 
 ament_package()
