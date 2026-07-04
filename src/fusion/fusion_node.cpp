@@ -1,7 +1,13 @@
 #include "olive/fusion/fusion_node.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <thread>
+
+#include <tf2_eigen/tf2_eigen.hpp>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
 
 #include <pcl/common/transforms.h>
 #include <pcl_conversions/pcl_conversions.h>
@@ -92,6 +98,18 @@ void FusionNode::declareParameters()
     declare_parameter("stationary_gyro_thresh_rad_s", 0.02);
     declare_parameter("stationary_wheel_thresh_m", 0.005);
     declare_parameter("gyro_bias_reestimate", false);
+
+    declare_parameter("imu_time_offset_s", 0.0);
+    declare_parameter("wheel_time_offset_s", 0.0);
+    declare_parameter("camera_time_offset_s", 0.0);
+    declare_parameter("wheel_interp_slack_s", 0.05);
+    declare_parameter("marker_max_yaw_rate_rad_s", 0.6);
+    declare_parameter("marker_max_speed_m_s", 1.0);
+
+    declare_parameter("extrinsics_from_tf", false);
+    declare_parameter("lidar_frame", "lidar_link");
+    declare_parameter("camera_frame", "camera_link");
+    declare_parameter("extrinsics_tf_timeout_s", 5.0);
 
     declare_parameter("min_range", 0.3);
     declare_parameter("max_range", 12.0);
@@ -184,6 +202,9 @@ void FusionNode::loadConfiguration()
     }
     marker_gate_ = std::make_unique<MarkerGate>(gate_config);
 
+    if (get_parameter("extrinsics_from_tf").as_bool())
+        loadExtrinsicsFromTf();
+
     const auto translation               = get_parameter("lidar_translation").as_double_array();
     const auto rpy                       = get_parameter("lidar_rpy").as_double_array();
     preprocessor_config_.base_from_lidar = pcl::getTransformation(
@@ -204,6 +225,14 @@ void FusionNode::loadConfiguration()
     stationary_gyro_thresh_ = get_parameter("stationary_gyro_thresh_rad_s").as_double();
     stationary_wheel_thresh_ = get_parameter("stationary_wheel_thresh_m").as_double();
     gyro_bias_reestimate_   = get_parameter("gyro_bias_reestimate").as_bool();
+
+    imu_time_offset_    = get_parameter("imu_time_offset_s").as_double();
+    wheel_time_offset_  = get_parameter("wheel_time_offset_s").as_double();
+    camera_time_offset_ = get_parameter("camera_time_offset_s").as_double();
+    wheel_buffer_.setInterpolationSlack(get_parameter("wheel_interp_slack_s").as_double());
+    marker_max_yaw_rate_ = get_parameter("marker_max_yaw_rate_rad_s").as_double();
+    marker_max_speed_    = get_parameter("marker_max_speed_m_s").as_double();
+    latency_logged_.clear();
 
     preprocessor_config_.min_range = static_cast<float>(get_parameter("min_range").as_double());
     preprocessor_config_.max_range = static_cast<float>(get_parameter("max_range").as_double());
@@ -384,7 +413,9 @@ void FusionNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
 {
     ImuData sample;
     sample.timestamp =
-        static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec;
+        static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec +
+        imu_time_offset_;
+    logSensorLatency("imu", sample.timestamp);
     sample.angular_velocity =
         Eigen::Vector3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
     sample.linear_acceleration = Eigen::Vector3d(
@@ -476,6 +507,112 @@ void FusionNode::handleImuInit(double stamp)
         tilt);
 }
 
+void FusionNode::logSensorLatency(const char* sensor, double stamp)
+{
+    // One-shot characterization aid: the first few messages per sensor get an
+    // arrival-minus-stamp report so clock offsets and driver latency are
+    // visible at bring-up without extra tooling.
+    int& count = latency_logged_[sensor];
+    if (count >= 3)
+        return;
+    ++count;
+    const double now = static_cast<double>(get_clock()->now().nanoseconds()) * 1e-9;
+    RCLCPP_INFO(
+        get_logger(),
+        "%s stamp-to-arrival latency: %+.1f ms%s",
+        sensor,
+        (now - stamp) * 1e3,
+        count == 3 ? " (final report; tune *_time_offset_s if large)" : "");
+}
+
+bool FusionNode::markerMotionGate(double stamp)
+{
+    // Real cameras blur under fast motion and the detector's centroid lags;
+    // anchoring from such frames imprints the error into the graph.
+    const double yaw_rate = std::abs(imu_buffer_.rateNear(stamp).z());
+    if (yaw_rate > marker_max_yaw_rate_)
+    {
+        RCLCPP_INFO_THROTTLE(
+            get_logger(), *get_clock(), 5000,
+            "Marker detections rejected: yaw rate %.2f rad/s above limit", yaw_rate);
+        return false;
+    }
+    if (wheel_buffer_.hasData())
+    {
+        const auto delta = wheel_buffer_.relativePose(stamp - 0.2, stamp);
+        if (delta && delta->translation().norm() / 0.2 > marker_max_speed_)
+        {
+            RCLCPP_INFO_THROTTLE(
+                get_logger(), *get_clock(), 5000,
+                "Marker detections rejected: speed above limit");
+            return false;
+        }
+    }
+    return true;
+}
+
+void FusionNode::loadExtrinsicsFromTf()
+{
+    const double      timeout      = get_parameter("extrinsics_tf_timeout_s").as_double();
+    const std::string lidar_frame  = get_parameter("lidar_frame").as_string();
+    const std::string camera_frame = get_parameter("camera_frame").as_string();
+
+    // on_configure runs on this node's executor thread, so the listener must
+    // spin its own internal node (spin_thread=true, the default) or the
+    // static transforms could never be received while we wait here.
+    tf2_ros::Buffer            buffer(get_clock());
+    tf2_ros::TransformListener listener(buffer);
+
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                              std::chrono::duration<double>(timeout));
+    bool available = false;
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        if (buffer.canTransform(base_frame_, lidar_frame, tf2::TimePointZero) &&
+            buffer.canTransform(base_frame_, camera_frame, tf2::TimePointZero))
+        {
+            available = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    if (!available)
+    {
+        RCLCPP_WARN(
+            get_logger(),
+            "extrinsics_from_tf: %s->{%s, %s} not available within %.1f s - keeping the "
+            "parameter-provided extrinsics",
+            base_frame_.c_str(),
+            lidar_frame.c_str(),
+            camera_frame.c_str(),
+            timeout);
+        return;
+    }
+
+    const Eigen::Isometry3d base_from_lidar = tf2::transformToEigen(
+        buffer.lookupTransform(base_frame_, lidar_frame, tf2::TimePointZero));
+    preprocessor_config_.base_from_lidar = base_from_lidar.cast<float>();
+
+    const Eigen::Isometry3d base_from_cam = tf2::transformToEigen(
+        buffer.lookupTransform(base_frame_, camera_frame, tf2::TimePointZero));
+    base_from_camera_ =
+        gtsam::Pose3(gtsam::Rot3(base_from_cam.rotation()), gtsam::Point3(base_from_cam.translation()));
+
+    RCLCPP_INFO(
+        get_logger(),
+        "Extrinsics from TF: lidar [%.3f %.3f %.3f], camera [%.3f %.3f %.3f] (frame '%s' - "
+        "make sure the detector reports positions in this frame's convention)",
+        base_from_lidar.translation().x(),
+        base_from_lidar.translation().y(),
+        base_from_lidar.translation().z(),
+        base_from_cam.translation().x(),
+        base_from_cam.translation().y(),
+        base_from_cam.translation().z(),
+        camera_frame.c_str());
+}
+
 void FusionNode::reestimateGyroBias()
 {
     if (!imu_init_done_ || !imu_buffer_.hasData())
@@ -502,15 +639,19 @@ void FusionNode::reestimateGyroBias()
 
 void FusionNode::wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
 {
-    const double stamp =
-        static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec;
+    const double stamp = static_cast<double>(msg->header.stamp.sec) +
+                         1e-9 * msg->header.stamp.nanosec + wheel_time_offset_;
+    logSensorLatency("wheel", stamp);
     wheel_buffer_.push(stamp, gtsam_conversions::toGtsamPose(msg->pose.pose));
 }
 
 void FusionNode::markerCallback(const whycode_vision::msg::WhyCodePoseArray::SharedPtr msg)
 {
-    const double stamp =
-        static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec;
+    const double stamp = static_cast<double>(msg->header.stamp.sec) +
+                         1e-9 * msg->header.stamp.nanosec + camera_time_offset_;
+    logSensorLatency("camera", stamp);
+    if (!markerMotionGate(stamp))
+        return;
     for (const auto& detection : msg->poses)
     {
         marker_gate_->push(
@@ -578,6 +719,8 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
 
     if (!preprocessor_->process(*msg, scan_image_))
         return;
+
+    logSensorLatency("lidar", scan_image_.stamp);
 
     feature_extractor_->extract(scan_image_, features_);
 

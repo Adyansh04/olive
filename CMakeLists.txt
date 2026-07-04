@@ -148,6 +148,10 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_imu_buffer test/test_imu_buffer.cpp src/fusion/imu_buffer.cpp)
   target_include_directories(test_imu_buffer PRIVATE ${EIGEN3_INCLUDE_DIRS})
+
+  ament_add_gtest(test_wheel_odom_buffer
+    test/test_wheel_odom_buffer.cpp src/fusion/wheel_odom_buffer.cpp)
+  target_link_libraries(test_wheel_odom_buffer gtsam)
 endif()
 
 ament_package()

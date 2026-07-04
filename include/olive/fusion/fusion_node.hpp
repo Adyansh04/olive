@@ -67,6 +67,9 @@ private:
 
     // IMU startup initialization (gyro bias + sanity checks; gates scans)
     void handleImuInit(double stamp);
+    void loadExtrinsicsFromTf();
+    void logSensorLatency(const char* sensor, double stamp);
+    bool markerMotionGate(double stamp);
     void reestimateGyroBias();
 
     // Debug / RViz visualization (all gated by parameters, live-switchable)
@@ -141,6 +144,18 @@ private:
     double stationary_gyro_thresh_ = 0.02;
     double stationary_wheel_thresh_ = 0.005;
     bool   gyro_bias_reestimate_   = false;
+
+    // Cross-sensor time offsets (lidar is the reference; corrected = msg + offset)
+    double imu_time_offset_    = 0.0;
+    double wheel_time_offset_  = 0.0;
+    double camera_time_offset_ = 0.0;
+
+    // Marker motion gating (camera blur guard on real hardware)
+    double marker_max_yaw_rate_ = 0.6;
+    double marker_max_speed_    = 1.0;
+
+    // One-shot per-sensor latency characterization at startup
+    std::unordered_map<std::string, int> latency_logged_;
 
     // ROS interfaces
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr           points_sub_;

@@ -1,0 +1,127 @@
+# OLIVE sensor-fusion configuration — REAL ROBOT TEMPLATE
+#
+# Copy of the structure in fusion.yaml with real-hardware guidance. Values
+# marked TODO must come from your calibration; everything else is a sane
+# starting point. Bring-up order (details in the README):
+#   1. camera intrinsics (put the calibrated yaml next to this file and point
+#      the detector config at it)
+#   2. extrinsics (URDF/TF or the *_translation/_rpy params below)
+#   3. IMU units/axes sanity: launch and read the "IMU init" log lines
+#   4. per-sensor time offsets: read the "stamp-to-arrival latency" log lines
+#   5. detector range scale: ros2 run olive calibrate_marker_range.py
+#
+# Launch with: ros2 launch olive sensor_fusion.launch.py \
+#                config_file:=<path>/fusion_real.yaml
+
+modalities:
+  lio: true
+  wheel: true
+  markers: true
+  vo: false          # enable only after the rest works; weakest modality
+
+fusion_node:
+  ros__parameters:
+    use_sim_time: false
+    autostart: true
+
+    points_topic: /lidar/points        # TODO: your driver's PointCloud2 topic
+    imu_topic: /imu/data               # TODO: raw 6-axis stream preferred
+    odom_topic: /olive/odometry
+    wheel_odom_topic: /odom            # TODO: your base driver's odometry
+
+    odom_frame: odom
+    base_frame: base_link
+    map_frame: map
+
+    # --- extrinsics -------------------------------------------------------
+    # Prefer TF from your URDF; else fill the params.
+    extrinsics_from_tf: true
+    lidar_frame: lidar_link            # TODO: match your URDF
+    camera_frame: camera_optical_link  # TODO: the frame the DETECTOR reports
+                                       # in — real whycode uses the OPTICAL
+                                       # convention (z forward), unlike sim
+    extrinsics_tf_timeout_s: 5.0
+    lidar_translation: [0.0, 0.0, 0.0]   # TODO (fallback if not from TF)
+    lidar_rpy: [0.0, 0.0, 0.0]           # TODO
+    camera_translation: [0.0, 0.0, 0.0]  # TODO
+    camera_rpy: [0.0, 0.0, 0.0]          # TODO: optical convention is
+                                         # [-1.5707963, 0, -1.5707963]
+    imu_rpy: [0.0, 0.0, 0.0]             # TODO: IMU mounting rotation
+
+    # --- IMU startup ------------------------------------------------------
+    # Keep the robot STATIONARY for imu_init_duration_s after launch.
+    imu_init_duration_s: 2.0
+    imu_init_max_wait_s: 15.0
+    stationary_gyro_thresh_rad_s: 0.03   # raise for noisier gyros
+    stationary_wheel_thresh_m: 0.005
+    gyro_bias_reestimate: true           # tracks temperature drift
+
+    # --- time sync --------------------------------------------------------
+    # Read the startup latency log lines, then compensate here.
+    imu_time_offset_s: 0.0               # TODO
+    wheel_time_offset_s: 0.0             # TODO
+    camera_time_offset_s: 0.0            # TODO
+    wheel_interp_slack_s: 0.15           # real drivers lag more than sim
+
+    # --- scan preprocessing -----------------------------------------------
+    min_range: 0.5                       # TODO: above your robot's own body!
+    max_range: 30.0                      # TODO: sensor spec
+    planar_motion: true
+    curvature_window: 2                  # 2 for ~1 deg azimuth resolution;
+                                         # 5 for 0.2 deg (VLP-16 class)
+    edge_threshold: 1.0
+    planar_threshold: 0.1
+    scan_planar_leaf_size: 0.2
+
+    # --- matcher / keyframes ----------------------------------------------
+    matcher_max_iterations: 30
+    degeneracy_eigen_threshold: 100.0
+    keyframe_translation_m: 0.5
+    keyframe_rotation_deg: 12.0
+    local_map_radius_m: 25.0
+    local_map_recent_s: 10.0
+    map_edge_leaf_size: 0.1
+    map_planar_leaf_size: 0.2
+
+    # --- markers ----------------------------------------------------------
+    marker_topic: /whycode/poses
+    marker_position_sigma_m: 0.15        # real detections are noisier
+    marker_stamp_window_s: 0.1
+    marker_min_range_m: 0.5
+    marker_max_range_m: 5.0
+    marker_min_track_frames: 5           # stricter than sim
+    marker_max_yaw_rate_rad_s: 0.4       # blur guard: stricter than sim
+    marker_max_speed_m_s: 0.7
+    known_marker_ids: []                 # TODO: surveyed markers
+    known_marker_positions: []           # TODO: world x,y,z per id — z is in
+                                         # the MAP frame (origin at base_link
+                                         # start height, not the floor)
+
+    # --- graph ------------------------------------------------------------
+    relinearize_threshold: 0.1
+    relinearize_skip: 1
+    lidar_between_sigmas: [0.01, 0.01, 0.01, 0.001, 0.001, 0.001]
+    wheel_between_sigmas: [0.03, 0.03, 0.5, 0.5, 0.5, 0.2]
+    planar_prior_sigmas: [0.02, 0.009, 0.009]
+
+    # --- debug (disable for deployment) ------------------------------------
+    publish_debug: false
+    debug_path: true
+    debug_keyframes: true
+    debug_local_map: true
+    debug_scan_features: true
+    debug_fiducials: true
+
+vo_node:
+  ros__parameters:
+    use_sim_time: false
+    autostart: true
+    image_topic: /camera/image_raw       # TODO
+    camera_info_topic: /camera/camera_info
+    wheel_odom_topic: /odom
+    odom_topic: /olive/visual_odom
+    max_features: 300
+    min_tracked_features: 40             # feature-rich real scenes allow more
+    min_parallax_px: 5.0
+    ransac_threshold_px: 1.0
+    min_wheel_motion_m: 0.03

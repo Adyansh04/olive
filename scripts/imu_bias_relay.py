@@ -26,6 +26,7 @@ class ImuBiasRelay(Node):
         super().__init__('imu_bias_relay')
         self.set_parameters([rclpy.parameter.Parameter('use_sim_time', value=True)])
         self.bias = (args.bias_x, args.bias_y, args.bias_z)
+        self.stamp_offset = args.stamp_offset_s
         qos = QoSProfile(depth=50, reliability=ReliabilityPolicy.BEST_EFFORT)
         self.pub = self.create_publisher(Imu, args.out_topic, qos)
         self.create_subscription(Imu, args.in_topic, self.callback, qos)
@@ -33,6 +34,10 @@ class ImuBiasRelay(Node):
             f"relaying {args.in_topic} -> {args.out_topic} with gyro bias {self.bias} rad/s")
 
     def callback(self, msg):
+        if self.stamp_offset:
+            t = msg.header.stamp.sec + 1e-9 * msg.header.stamp.nanosec + self.stamp_offset
+            msg.header.stamp.sec = int(t)
+            msg.header.stamp.nanosec = int((t - int(t)) * 1e9)
         msg.angular_velocity.x += self.bias[0]
         msg.angular_velocity.y += self.bias[1]
         msg.angular_velocity.z += self.bias[2]
@@ -46,6 +51,8 @@ def main():
     parser.add_argument('--bias-x', type=float, default=0.0)
     parser.add_argument('--bias-y', type=float, default=0.0)
     parser.add_argument('--bias-z', type=float, default=0.02)
+    parser.add_argument('--stamp-offset-s', type=float, default=0.0,
+                        help='shift stamps to simulate a sensor clock offset')
     args = parser.parse_args()
 
     rclpy.init()
