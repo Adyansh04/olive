@@ -30,7 +30,7 @@ detector:
   # Marker physical dimensions (meters)
   inner_diameter: 0.12        # Inner diameter of marker (0.066) (0.124) (loop bag: 0.088) (big Markers: 0.136 )
   outer_diameter: 0.20        # Outer diameter of marker (0.108) (0.206) (loop bag: 0.146)  (big Markers: 0.252)
-  outer_diameter_multiplier: 1.115  # Multiplier for outer diameter to scale detection size
+  outer_diameter_multiplier: 1.096  # calibrated in sim: raw 1.115 read +1.7% long at 2.18 m  # Multiplier for outer diameter to scale detection size
 
 # ==============================================================================
 # IDENTIFICATION PARAMETERS
@@ -54,7 +54,8 @@ tracking:
   max_association_dist: 10.0  # Max distance (pixels) to associate an LK prediction with a detection.
   max_unseen_frames: 10       # Number of frames a track can be lost before being removed
   id_switch_threshold: 5      # Num of consecutive different ID detections needed to switch the locked ID.
-  pose_alpha: 0.2             # Smoothing factor for pose (XYZ). Smaller is smoother but has more lag. Range: 0.0-1.0.
+  pose_alpha: 1.0             # sim detections are clean; EMA smoothing adds lag that
+                              # biases anchors taken while moving (real robots: ~0.2)             # Smoothing factor for pose (XYZ). Smaller is smoother but has more lag. Range: 0.0-1.0.
   min_track_age: 0            # Min frames a track must exist to be considered "confirmed" and published.
   
 
