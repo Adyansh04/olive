@@ -7,6 +7,12 @@ WheelOdomBuffer::WheelOdomBuffer(double history_seconds)
   : history_seconds_(history_seconds)
 {}
 
+void WheelOdomBuffer::setInterpolationSlack(double seconds)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    slack_seconds_ = seconds;
+}
+
 void WheelOdomBuffer::push(double timestamp, const gtsam::Pose3& pose)
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -43,9 +49,9 @@ std::optional<gtsam::Pose3> WheelOdomBuffer::interpolate(double time) const
     if (samples_.empty())
         return std::nullopt;
 
-    // Tolerate small extrapolation at the ends (sensor latency).
-    constexpr double SLACK = 0.05;
-    if (time < samples_.front().first - SLACK || time > samples_.back().first + SLACK)
+    // Tolerate limited extrapolation at the ends (sensor latency).
+    if (time < samples_.front().first - slack_seconds_ ||
+        time > samples_.back().first + slack_seconds_)
         return std::nullopt;
     if (time <= samples_.front().first)
         return samples_.front().second;

@@ -50,6 +50,24 @@ fusion_node:
     # Slowly track gyro bias drift during stationary periods (real robots).
     gyro_bias_reestimate: false
 
+    # Cross-sensor time offsets (lidar is the reference clock; the offset is
+    # ADDED to each incoming stamp). The node logs per-sensor
+    # stamp-to-arrival latency for the first messages to help tune these.
+    imu_time_offset_s: 0.0
+    wheel_time_offset_s: 0.0
+    camera_time_offset_s: 0.0
+    # Max extrapolation beyond buffered wheel odometry before queries fail.
+    wheel_interp_slack_s: 0.05
+
+    # Optionally read base<-lidar / base<-camera extrinsics from tf_static
+    # (URDF via robot_state_publisher) instead of the params above.
+    # NOTE: camera_frame must match the frame the detector reports in
+    # (sim whycon: camera_link body convention; real: usually optical).
+    extrinsics_from_tf: false
+    lidar_frame: lidar_link
+    camera_frame: camera_link
+    extrinsics_tf_timeout_s: 5.0
+
     # Scan preprocessing
     min_range: 0.3
     max_range: 12.0
@@ -99,6 +117,10 @@ fusion_node:
     marker_min_range_m: 0.5
     marker_max_range_m: 6.0
     marker_min_track_frames: 3
+    # Motion gate: reject detections while turning/moving fast (real cameras
+    # blur and the detector centroid lags; sim drives stay below these).
+    marker_max_yaw_rate_rad_s: 0.6
+    marker_max_speed_m_s: 1.0
     # Known marker map: id -> surveyed position in the GLOBAL (world) frame.
     # The graph's map frame starts at the robot spawn; the first accepted
     # marker anchor bends the trajectory into this global frame (the X(0)

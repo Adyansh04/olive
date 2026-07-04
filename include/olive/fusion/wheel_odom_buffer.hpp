@@ -26,6 +26,10 @@ class WheelOdomBuffer
 public:
     explicit WheelOdomBuffer(double history_seconds = 30.0);
 
+    /// Max extrapolation beyond the buffered range before queries fail (s).
+    /// Real wheel drivers can lag scan stamps by more than the default.
+    void setInterpolationSlack(double seconds);
+
     /// Add a sample (called from the odometry subscription)
     void push(double timestamp, const gtsam::Pose3& pose);
 
@@ -47,6 +51,7 @@ private:
     mutable std::mutex                          mutex_;
     std::deque<std::pair<double, gtsam::Pose3>> samples_;
     double                                      history_seconds_;
+    double                                      slack_seconds_ = 0.05;
 };
 
 }  // namespace olive
