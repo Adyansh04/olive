@@ -27,6 +27,9 @@ class ImuBiasRelay(Node):
         self.set_parameters([rclpy.parameter.Parameter('use_sim_time', value=True)])
         self.bias = (args.bias_x, args.bias_y, args.bias_z)
         self.stamp_offset = args.stamp_offset_s
+        self.bias_after = args.bias_after_s
+        self.first_stamp = None
+        self.stepped = False
         qos = QoSProfile(depth=50, reliability=ReliabilityPolicy.BEST_EFFORT)
         self.pub = self.create_publisher(Imu, args.out_topic, qos)
         self.create_subscription(Imu, args.in_topic, self.callback, qos)
@@ -38,9 +41,18 @@ class ImuBiasRelay(Node):
             t = msg.header.stamp.sec + 1e-9 * msg.header.stamp.nanosec + self.stamp_offset
             msg.header.stamp.sec = int(t)
             msg.header.stamp.nanosec = int((t - int(t)) * 1e9)
-        msg.angular_velocity.x += self.bias[0]
-        msg.angular_velocity.y += self.bias[1]
-        msg.angular_velocity.z += self.bias[2]
+        stamp = msg.header.stamp.sec + 1e-9 * msg.header.stamp.nanosec
+        if self.first_stamp is None:
+            self.first_stamp = stamp
+        # --bias-after-s: step the bias on mid-run (models temperature drift
+        # that the stationary startup estimate cannot see).
+        if stamp - self.first_stamp >= self.bias_after:
+            if not self.stepped and self.bias_after > 0.0:
+                self.stepped = True
+                self.get_logger().info(f"bias step applied at t+{self.bias_after:.0f}s")
+            msg.angular_velocity.x += self.bias[0]
+            msg.angular_velocity.y += self.bias[1]
+            msg.angular_velocity.z += self.bias[2]
         self.pub.publish(msg)
 
 
@@ -53,6 +65,9 @@ def main():
     parser.add_argument('--bias-z', type=float, default=0.02)
     parser.add_argument('--stamp-offset-s', type=float, default=0.0,
                         help='shift stamps to simulate a sensor clock offset')
+    parser.add_argument('--bias-after-s', type=float, default=0.0,
+                        help='apply the bias only after this many seconds '
+                             '(a mid-run step the startup estimate cannot see)')
     args = parser.parse_args()
 
     rclpy.init()
