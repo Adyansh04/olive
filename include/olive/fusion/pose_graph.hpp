@@ -174,9 +174,14 @@ public:
     /**
      * @brief Run the incremental update; call once after adding factors
      *
-     * On FAILED the pending factors/values are discarded and the keyframe
-     * count rolls back to the last committed state, so the caller must skip
-     * the keyframe entirely (an indeterminate system must not kill the node).
+     * On FAILED the pending factors/values are discarded and all bookkeeping
+     * (keyframe count, landmark ids, IMU chain, committed velocity/bias)
+     * rolls back to the last committed state, so the caller must skip the
+     * keyframe entirely (an indeterminate system must not kill the node).
+     * Committed queries keep serving the last good state. Note: iSAM2 gives
+     * no strong exception guarantee — depending on where the update threw,
+     * later rounds may fail too; the node then degrades to scan-matching
+     * (published pose stays live), which is the intended failure mode.
      */
     OptimizeResult optimize();
 

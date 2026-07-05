@@ -160,6 +160,9 @@ if(BUILD_TESTING)
   ament_add_gtest(test_marker_gate test/test_marker_gate.cpp src/fusion/marker_gate.cpp)
   target_link_libraries(test_marker_gate gtsam)
 
+  ament_add_gtest(test_pose_graph test/test_pose_graph.cpp src/fusion/pose_graph.cpp)
+  target_link_libraries(test_pose_graph gtsam gtsam_unstable)
+
   ament_add_gtest(test_imu_buffer test/test_imu_buffer.cpp src/fusion/imu_buffer.cpp)
   target_include_directories(test_imu_buffer PRIVATE ${EIGEN3_INCLUDE_DIRS})
 
