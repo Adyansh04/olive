@@ -61,12 +61,20 @@ fusion_node:
     # accel 1.7e-2 m/s^2 per sample @100 Hz -> continuous 2e-5 / 1.7e-3) with
     # ~5x margin for model error.
     imu_preintegration: true
-    accel_noise_sigma: 0.01        # m/s^2/sqrt(Hz)
-    gyro_noise_sigma: 1.0e-4       # rad/s/sqrt(Hz)
+    # Accel deliberately de-weighted (10-100x spec): the planar clamp cannot
+    # represent the real pitch transients of a braking/accelerating robot, so
+    # gravity leaks ~9.81*sin(pitch) (~0.7 m/s^2 at 4 deg) into the accel
+    # residual. With sigma 1.0 that leakage sits inside 1 sigma and the tight
+    # coupling contributes what a planar ground robot actually needs from the
+    # IMU: the rotational constraint and ONLINE gyro-bias estimation.
+    accel_noise_sigma: 1.0         # m/s^2/sqrt(Hz)
+    gyro_noise_sigma: 1.0e-4       # rad/s/sqrt(Hz) (~5x sim spec)
     accel_bias_rw_sigma: 1.0e-3    # bias random walk (adaptation speed)
     gyro_bias_rw_sigma: 5.0e-4
     integration_sigma: 1.0e-4
     bias_acc_omega_int: 1.0e-4
+    imu_preint_max_interval_s: 5.0 # skip the factor across long stationary
+                                   # gaps (keyframes are distance-gated)
     debug_imu_state: true          # /olive/debug/bias + /olive/debug/velocity
 
     imu_init_duration_s: 1.5

@@ -116,6 +116,7 @@ void FusionNode::declareParameters()
     declare_parameter("gyro_bias_rw_sigma", 1.0e-4);
     declare_parameter("integration_sigma", 1.0e-4);
     declare_parameter("bias_acc_omega_int", 1.0e-4);
+    declare_parameter("imu_preint_max_interval_s", 5.0);
     declare_parameter("debug_imu_state", true);
 
     declare_parameter("imu_time_offset_s", 0.0);
@@ -299,8 +300,9 @@ void FusionNode::loadConfiguration()
     stationary_wheel_thresh_ = get_parameter("stationary_wheel_thresh_m").as_double();
     gyro_bias_reestimate_    = get_parameter("gyro_bias_reestimate").as_bool();
 
-    imu_preintegration_ = get_parameter("imu_preintegration").as_bool();
-    debug_imu_state_    = get_parameter("debug_imu_state").as_bool();
+    imu_preintegration_      = get_parameter("imu_preintegration").as_bool();
+    imu_preint_max_interval_ = get_parameter("imu_preint_max_interval_s").as_double();
+    debug_imu_state_         = get_parameter("debug_imu_state").as_bool();
     if (imu_preintegration_)
     {
         // Combined preintegration: accel/gyro white noise + bias random walks
@@ -1150,10 +1152,14 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
             // factor when the buffer doesn't cover the interval (long outage
             // vs. buffer history) — the lidar/wheel betweens still chain and
             // the graph re-seeds V/B at the next covered keyframe.
-            const auto samples = imu_buffer_.samplesBetween(previous_stamp, features_.stamp);
-            const bool covered =
-                samples.size() >= 2 && samples.back().timestamp - previous_stamp >
-                                           (features_.stamp - previous_stamp) - 0.1;
+            // Keyframes are distance-gated, so a stationary pause stretches
+            // the interval arbitrarily; preintegrating tens of seconds gives
+            // a huge, poorly-linearized factor. Cap it — the chain re-seeds
+            // at the next covered keyframe.
+            const double interval = features_.stamp - previous_stamp;
+            const auto   samples  = imu_buffer_.samplesBetween(previous_stamp, features_.stamp);
+            const bool   covered  = samples.size() >= 2 && interval <= imu_preint_max_interval_ &&
+                                 samples.back().timestamp - previous_stamp > interval - 0.1;
             if (covered)
             {
                 pim_->resetIntegrationAndSetBias(pose_graph_->latestBias());
@@ -1246,10 +1252,14 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
 
         if (imu_preintegration_)
         {
-            // Feed the online bias estimate back to the buffer so deskew,
-            // prediction and rateNear() all run with the graph's best bias.
+            // NOTE: the graph's bias estimate is deliberately NOT fed back
+            // into the buffer (deskew/prediction). That closes a loop through
+            // the scan matcher — a transient bias mis-estimate corrupts
+            // deskew, which corrupts the match, which reinforces the
+            // mis-estimate (observed as non-repeatable yaw excursions). The
+            // buffer keeps the stationary-init bias; the graph's online
+            // estimate corrects the FACTORS and is published for monitoring.
             const auto bias = pose_graph_->latestBias();
-            imu_buffer_.setGyroBias(bias.gyroscope());
 
             if (debug_imu_state_ && debug_bias_pub_->is_activated())
             {

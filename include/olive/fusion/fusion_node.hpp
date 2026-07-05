@@ -167,7 +167,8 @@ private:
     geometry_msgs::msg::Twist   last_wheel_twist_;
 
     // IMU tight coupling (preintegration into the graph)
-    bool                                                      imu_preintegration_ = false;
+    bool                                                      imu_preintegration_      = false;
+    double                                                    imu_preint_max_interval_ = 5.0;
     std::unique_ptr<gtsam::PreintegratedCombinedMeasurements> pim_;
 
     // IMU initialization state

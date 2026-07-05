@@ -248,13 +248,16 @@ void PoseGraph::addCombinedImuFactor(
     }
     else
     {
-        // Chain broken (a keyframe without IMU states, e.g. wheel-paced
-        // dropout keyframe): re-seed with priors so the factor never
-        // references a missing key.
+        // Chain broken (interval cap across a stationary pause, or a
+        // keyframe without IMU states): re-seed with priors so the following
+        // factor never references a missing key. The committed velocity is
+        // STALE here (it predates the break), so its prior must be loose — a
+        // seed, not a measurement. The bias varies slowly; the committed
+        // value stays trustworthy.
         pending_factors_.add(gtsam::PriorFactor<gtsam::Vector3>(
             V(n),
             last_velocity_,
-            gtsam::noiseModel::Isotropic::Sigma(3, velocity_sigma_)));
+            gtsam::noiseModel::Isotropic::Sigma(3, 1.0)));
         gtsam::Vector6 bias_sigmas;
         bias_sigmas << accel_bias_sigma_, accel_bias_sigma_, accel_bias_sigma_, gyro_bias_sigma_,
             gyro_bias_sigma_, gyro_bias_sigma_;

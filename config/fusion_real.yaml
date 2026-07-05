@@ -82,6 +82,7 @@ fusion_node:
     gyro_bias_rw_sigma: 1.0e-4           # TODO
     integration_sigma: 1.0e-4
     bias_acc_omega_int: 1.0e-4
+    imu_preint_max_interval_s: 5.0
     debug_imu_state: true                # plot /olive/debug/bias to verify
 
     # --- time sync --------------------------------------------------------
