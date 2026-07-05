@@ -60,6 +60,29 @@ Visualization Manager:
         Value: false
       Value: true
     - Class: rviz_default_plugins/Odometry
+      Enabled: true
+      Name: Local Odometry (smooth)
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /olive/odometry_local
+      Keep: 100
+      Position Tolerance: 0.05
+      Angle Tolerance: 0.05
+      Shape:
+        Value: Arrow
+        Color: 0; 128; 255
+        Alpha: 1
+        Shaft Length: 0.2
+        Shaft Radius: 0.02
+        Head Length: 0.07
+        Head Radius: 0.04
+      Covariance:
+        Value: false
+      Value: true
+    - Class: rviz_default_plugins/Odometry
       Enabled: false
       Name: Ground Truth
       Topic:

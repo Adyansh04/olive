@@ -84,39 +84,75 @@ def main():
     ap.add_argument("--fused-topic", default="/olive/odometry")
     ap.add_argument("--gt-topic", default="/ground_truth")
     ap.add_argument("--wheel-topic", default="/odom")
+    ap.add_argument("--local-topic", default="/olive/odometry_local",
+                    help="smooth odom-frame stream; checked for continuity (no jumps)")
+    ap.add_argument("--max-step", type=float, default=0.0,
+                    help="fail (exit 1) if the local stream steps more than this (m); 0 = report only")
     ap.add_argument("--anchor-thresh", type=float, default=0.5,
                     help="error (m) below which the trajectory is considered world-anchored")
     args = ap.parse_args()
 
-    want = {args.fused_topic, args.gt_topic, args.wheel_topic}
+    want = {args.fused_topic, args.gt_topic, args.wheel_topic, args.local_topic, "/tf"}
     reader, tmp = open_reader(args.bag)
     try:
         types = {t.name: t.type for t in reader.get_all_topics_and_types()}
-        gt, fused, wheel, first = [], [], [], {}
+        gt, fused, wheel, local, map_odom = [], [], [], [], []
+        first = {}
         while reader.has_next():
             topic, data, _ = reader.read_next()
-            if topic not in want:
+            if topic not in want or topic not in types:
                 continue
             msg = deserialize_message(data, get_message(types[topic]))
+            if topic == "/tf":
+                for tr in msg.transforms:
+                    if tr.header.frame_id == "map" and tr.child_frame_id == "odom":
+                        t = tr.transform.translation
+                        map_odom.append((stamp_s(tr.header), t.x, t.y))
+                continue
             p = msg.pose.pose.position
             rec = (stamp_s(msg.header), p.x, p.y, yaw_of(msg.pose.pose.orientation))
             if topic not in first:
                 first[topic] = (msg.header.frame_id, msg.child_frame_id, p.x, p.y)
             (gt if topic == args.gt_topic else fused if topic == args.fused_topic
-             else wheel).append(rec)
+             else local if topic == args.local_topic else wheel).append(rec)
     finally:
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)
 
     print("=== FRAME IDS + first position ===")
-    for t in (args.gt_topic, args.wheel_topic, args.fused_topic):
+    for t in (args.gt_topic, args.wheel_topic, args.fused_topic, args.local_topic):
         f = first.get(t)
         if f:
-            print(f"  {t:18s} frame_id={f[0]!r:10s} child={f[1]!r:16s} "
+            print(f"  {t:22s} frame_id={f[0]!r:10s} child={f[1]!r:16s} "
                   f"first_xy=({f[2]:+.2f},{f[3]:+.2f})")
+
+    # Continuity: the smooth odom-frame stream must never jump — anchor and
+    # loop corrections belong in map->odom (which is ALLOWED to jump).
+    continuity_ok = True
+    if local:
+        local.sort()
+        steps = [(b[0], math.hypot(b[1] - a[1], b[2] - a[2]))
+                 for a, b in zip(local, local[1:])]
+        max_t, max_step = max(steps, key=lambda s: s[1]) if steps else (0.0, 0.0)
+        print(f"\n=== LOCAL ODOM CONTINUITY ({args.local_topic}) ===")
+        print(f"  samples: {len(local)}   max inter-sample step: {max_step:.4f} m "
+              f"(at t={max_t - local[0][0]:.1f}s)")
+        if map_odom:
+            map_odom.sort()
+            tf_steps = [math.hypot(b[1] - a[1], b[2] - a[2])
+                        for a, b in zip(map_odom, map_odom[1:])]
+            print(f"  map->odom TF: {len(map_odom)} samples, max step: "
+                  f"{max(tf_steps) if tf_steps else 0.0:.3f} m "
+                  f"(jumps are EXPECTED here - that's the correction)")
+        if args.max_step > 0.0:
+            continuity_ok = max_step <= args.max_step
+            print(f"  continuity {'OK' if continuity_ok else 'VIOLATION'} "
+                  f"(threshold {args.max_step} m)")
 
     if not fused or not gt:
         print("\n(no fused/ground-truth samples found - check --fused-topic/--gt-topic)")
+        if not continuity_ok:
+            raise SystemExit(1)
         return
 
     gt.sort()
@@ -153,6 +189,9 @@ def main():
         print("\n=== WHEEL odom (spawn-relative; expected NOT to match world GT) ===")
         print(f"  first_xy=({wheel[0][1]:+.2f},{wheel[0][2]:+.2f})  "
               f"last_xy=({wheel[-1][1]:+.2f},{wheel[-1][2]:+.2f})")
+
+    if not continuity_ok:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

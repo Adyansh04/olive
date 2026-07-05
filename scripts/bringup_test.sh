@@ -10,7 +10,7 @@
 # Usage:
 #   ros2 run olive bringup_test.sh [world] [test] [rviz]
 #     world: maze (default) | fusion_test | warehouse | office | industrial
-#     test : none (default) | drive | drive-long | ate | marker
+#     test : none (default) | drive | drive-long | ate | marker | smooth
 #     rviz : add the literal argument "rviz" to open RViz with the debug config
 
 WORLD="${1:-maze}"
@@ -61,6 +61,22 @@ case "$TEST" in
   drive-long) ros2 run olive drive_test.py --long ;;
   ate)        ros2 run olive ate_eval.py ;;
   marker)     ros2 run olive marker_demo.py ;;
+  smooth)
+    # Continuity check: record a drive (including the first marker-anchor
+    # snap), then assert the local odom stream never jumps while map->odom
+    # absorbs the corrections.
+    BAG_DIR="$LOG_DIR/smooth_bag"
+    rm -rf "$BAG_DIR"
+    ros2 bag record -o "$BAG_DIR" \
+      /olive/odometry /olive/odometry_local /ground_truth /odom /tf \
+      > "$LOG_DIR/smooth_bag.log" 2>&1 &
+    BAG_PID=$!
+    sleep 3
+    ros2 run olive drive_test.py --long
+    kill -INT "$BAG_PID" 2>/dev/null
+    wait "$BAG_PID" 2>/dev/null
+    ros2 run olive analyze_bag.py "$BAG_DIR" --max-step 0.05 || exit 1
+    ;;
   none)       echo "stack is up; run a test with: ros2 run olive drive_test.py" ;;
-  *)          echo "unknown test '$TEST' (drive|drive-long|ate|marker|none)"; exit 1 ;;
+  *)          echo "unknown test '$TEST' (drive|drive-long|ate|marker|smooth|none)"; exit 1 ;;
 esac
