@@ -117,6 +117,7 @@ private:
     double                                 marker_stamp_window_   = 0.25;
     bool                                   marker_landmark_mode_  = true;
     double                                 marker_survey_sigma_m_ = 0.05;
+    bool                                   world_anchored_        = false;
     std::unordered_map<int, gtsam::Point3> known_markers_;
 
     // Debug toggles (live-updatable via `ros2 param set`)

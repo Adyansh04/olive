@@ -244,6 +244,12 @@ void FusionNode::loadConfiguration()
         marker_landmark_mode_ && get_parameter("marker_accept_undecoded_ids").as_bool();
 
     known_markers_.clear();
+    // Free landmarks initialized before the first survey anchor would lock in
+    // the spawn-frame gauge and then fight the anchor snap (a gauge conflict
+    // that can fold the map). They are held back until the trajectory is
+    // world-anchored — unless nothing is surveyed, in which case the spawn
+    // gauge is the only gauge and there is no conflict.
+    world_anchored_      = false;
     const auto ids       = get_parameter("known_marker_ids").as_integer_array();
     const auto positions = get_parameter("known_marker_positions").as_double_array();
     for (size_t i = 0; i < ids.size() && i * 3 + 2 < positions.size(); ++i)
@@ -254,6 +260,8 @@ void FusionNode::loadConfiguration()
             gtsam::Point3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]));
         gate_config.known_ids.insert(id);
     }
+    if (known_markers_.empty())
+        world_anchored_ = true;  // no surveys: the spawn gauge is the gauge
     marker_gate_ = std::make_unique<MarkerGate>(gate_config);
 
     if (get_parameter("extrinsics_from_tf").as_bool())
@@ -1080,7 +1088,8 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
         if (use_planar_prior_)
             pose_graph_->addPlanarPrior(planar_prior_sigmas_);
 
-        int anchors = 0;
+        int  anchors             = 0;
+        bool surveyed_this_round = false;
         if (use_markers_)
         {
             for (const MarkerObservation& obs :
@@ -1094,14 +1103,20 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
                     // an odometry constraint.
                     const auto survey =
                         obs.decoded ? known_markers_.find(obs.marker_id) : known_markers_.end();
+                    const bool surveyed = survey != known_markers_.end();
+                    // Gauge guard: a free landmark initialized before the
+                    // first survey anchor encodes the spawn frame and later
+                    // fights the anchor snap — hold free landmarks back until
+                    // the trajectory is world-anchored.
+                    if (!surveyed && !world_anchored_)
+                        continue;
+                    surveyed_this_round = surveyed_this_round || surveyed;
                     pose_graph_->addMarkerObservation(
                         obs.landmark_key_id,
                         obs.position_in_camera,
                         base_from_camera_,
                         marker_sigma_m_,
-                        survey != known_markers_.end() ?
-                            std::optional<gtsam::Point3>(survey->second) :
-                            std::nullopt,
+                        surveyed ? std::optional<gtsam::Point3>(survey->second) : std::nullopt,
                         marker_survey_sigma_m_);
                 }
                 else
@@ -1145,6 +1160,8 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
             return;
         }
         const bool corrected = result == PoseGraph::OptimizeResult::CORRECTED;
+        if (surveyed_this_round)
+            world_anchored_ = true;  // gauge fixed: free landmarks may enter
 
         const gtsam::Pose3 optimized = pose_graph_->latestPose();
         Cloud::Ptr         edge_copy(new Cloud(*features_.edge));
