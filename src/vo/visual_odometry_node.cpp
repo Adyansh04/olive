@@ -24,6 +24,8 @@ VisualOdometryNode::VisualOdometryNode(const rclcpp::NodeOptions& options)
     declare_parameter("min_parallax_px", 12.0);
     declare_parameter("ransac_threshold_px", 1.0);
     declare_parameter("min_wheel_motion_m", 0.03);
+    declare_parameter("max_keyframe_age_s", 2.0);
+    declare_parameter("debug", false);
 
     if (get_parameter("autostart").as_bool())
     {
@@ -48,6 +50,8 @@ VisualOdometryNode::CallbackReturn VisualOdometryNode::on_configure(const rclcpp
     min_parallax_px_   = get_parameter("min_parallax_px").as_double();
     ransac_threshold_  = get_parameter("ransac_threshold_px").as_double();
     min_wheel_motion_  = get_parameter("min_wheel_motion_m").as_double();
+    max_keyframe_age_  = get_parameter("max_keyframe_age_s").as_double();
+    debug_             = get_parameter("debug").as_bool();
 
     pose_x_ = pose_y_ = pose_yaw_ = 0.0;
     keyframe_stamp_               = -1.0;
@@ -160,7 +164,12 @@ void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr 
     cv::Mat gray;
     cv::cvtColor(cv_bridge::toCvShare(msg, "rgb8")->image, gray, cv::COLOR_RGB2GRAY);
 
-    if (keyframe_stamp_ < 0.0 || static_cast<int>(keyframe_features_.size()) < min_tracked_)
+    // Bound the keyframe age: a stall (in-place turn, stationary pause) can leave
+    // a keyframe lingering until it is older than the wheel buffer, after which
+    // wheelDistance() can never resolve scale and VO wedges forever. Force a fresh
+    // keyframe well within the wheel history so it always recovers.
+    if (keyframe_stamp_ < 0.0 || static_cast<int>(keyframe_features_.size()) < min_tracked_ ||
+        (stamp - keyframe_stamp_) > max_keyframe_age_)
     {
         adoptKeyframe(gray, stamp);
         return;
@@ -186,16 +195,64 @@ void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr 
 
     if (static_cast<int>(p0.size()) < min_tracked_)
     {
+        if (debug_)
+        {
+            RCLCPP_INFO_THROTTLE(
+                get_logger(),
+                *get_clock(),
+                1000,
+                "VO gate: tracked %zu < min %d -> re-adopt keyframe "
+                "(kf had %zu features)",
+                p0.size(),
+                min_tracked_,
+                keyframe_features_.size());
+        }
         adoptKeyframe(gray, stamp);
         return;
     }
     parallax /= static_cast<double>(p0.size());
     if (parallax < min_parallax_px_)
+    {
+        if (debug_)
+        {
+            RCLCPP_INFO_THROTTLE(
+                get_logger(),
+                *get_clock(),
+                1000,
+                "VO gate: parallax %.1f px < min %.1f (tracked %zu) -> wait",
+                parallax,
+                min_parallax_px_,
+                p0.size());
+        }
         return;  // not enough baseline yet
+    }
 
     const auto wheel_motion = wheelDistance(keyframe_stamp_, stamp);
     if (!wheel_motion)
+    {
+        if (debug_)
+        {
+            RCLCPP_INFO_THROTTLE(
+                get_logger(),
+                *get_clock(),
+                1000,
+                "VO gate: no wheel scale for [%.2f, %.2f] -> wait",
+                keyframe_stamp_,
+                stamp);
+        }
         return;  // no scale reference yet; keep accumulating baseline
+    }
+    if (debug_)
+    {
+        RCLCPP_INFO_THROTTLE(
+            get_logger(),
+            *get_clock(),
+            1000,
+            "VO ok: tracked %zu  parallax %.1f px  wheel %.3f m",
+            p0.size(),
+            parallax,
+            *wheel_motion);
+    }
 
     if (*wheel_motion < min_wheel_motion_)
     {

@@ -2,14 +2,14 @@
 
 **O**ptimization of **L**idar, **I**nertial, **V**ision & **E**ncoders — graph-based multi-modal sensor fusion for a planar ground robot. ROS 2 **Jazzy**, C++17, [GTSAM](https://github.com/borglab/gtsam) factor-graph backend.
 
-One iSAM2 keyframe graph fuses LiDAR, IMU (tightly coupled), wheel encoders and WhyCode fiducials, with ICP loop closure. It produces both a globally-accurate map-frame pose and a smooth, jump-free odom-frame stream — a drop-in localization backend for Nav2.
+One iSAM2 keyframe graph fuses LiDAR, IMU (tightly coupled), wheel encoders, WhyCode fiducials and monocular visual odometry, with ICP loop closure. It produces both a globally-accurate map-frame pose and a smooth, jump-free odom-frame stream — a drop-in localization backend for Nav2.
 
 <p align="center">
-<img src="media/trajectory.png" width="49%" alt="Fused trajectory vs ground truth over 3 maze loops (3.6 cm RMSE)">
+<img src="media/trajectory.png" width="49%" alt="Fused trajectory vs ground truth over 3 maze loops (2.1 cm RMSE)">
 <img src="media/local_vs_wheel.png" width="49%" alt="Smooth local odometry stays tight while raw wheel odometry drifts">
 </p>
 
-*Left: the fused estimate tracks ground truth to a few cm over three 56 m loops. Right: in the continuous odom frame, OLIVE's fused local odometry (green) stays a tight, repeatable square while raw wheel dead-reckoning (red) drifts 17 m — the "smoother, more accurate odometry" a controller consumes.*
+*Left: the fused estimate tracks ground truth to ~2 cm over three 56 m loops. Right: in the continuous odom frame, OLIVE's fused local odometry (green) stays a tight, repeatable square while raw wheel dead-reckoning (red) drifts away — the "smoother, more accurate odometry" a controller consumes.*
 
 ## Architecture
 
@@ -21,7 +21,7 @@ One incremental (iSAM2) keyframe pose graph fuses every modality; each source is
 | IMU (tight coupling) | preintegrated rotation constraint + **online gyro/accel bias estimation** (`imu_preintegration`) | `CombinedImuFactor` chain over `V(i)`/`B(i)` states |
 | Wheel odometry (`wheel`) | metric-scale anchor | between factor (tight x/y, loose yaw) |
 | WhyCode fiducials (`markers`) | **landmark variables `L(id)`** (TagSLAM-style): surveyed ids anchor the world frame, any other repeatedly-sighted marker acts as an odometry constraint — position-only, orientation never used | robust binary observation factor (+ position prior for surveyed ids) |
-| Monocular camera (`vo`) | auxiliary wheel-scaled KLT visual odometry (default off) | robust between factor |
+| Monocular camera (`vo`) | auxiliary wheel-scaled KLT visual odometry (on in sim) — the weakest modality: correct scale but drifting heading, so it enters with **loose** sigmas and is downweighted | robust between factor |
 
 A soft planar prior pins z / roll / pitch (ground motion). Two odometry outputs implement the REP-105 split end-to-end:
 
@@ -116,16 +116,20 @@ colcon test --packages-select olive   # covariance conventions, scan matcher on
 
 ## Results
 
-Gazebo Harmonic, maze world (16×16 m), 3 loops of a 56 m square. Figures are
-generated from a recorded bag by [`scripts/plot_results.py`](scripts/plot_results.py).
+Gazebo Harmonic, maze world (16×16 m), 3 loops of a 56 m square. The maze is
+textured (tiled floor, brick/panel/block walls), dressed with wall paintings and
+3-D props, and its markers sit on white backing panels — feature-rich enough for
+the monocular VO front-end. Figures are generated from a recorded bag by
+[`scripts/plot_results.py`](scripts/plot_results.py).
 
 | Metric | Value |
 |--------|-------|
-| Absolute trajectory error (post-anchor, vs ground truth) | **3.6 cm RMSE**, 9.0 cm max |
+| Absolute trajectory error (post-anchor, vs ground truth) | **2.1 cm RMSE**, 4.1 cm max |
+| Fused ATE, VO on vs off (steady-state) | **1.9 cm vs 3.6 cm** — VO on is not worse (tight-sigma VO: 29 m) |
 | Drive-test relative accuracy (35 s multi-turn) | **1.4 cm / 0.22°** |
 | First-anchor drift reset (spawn frame → world) | 8.5 m → few cm, one sighting |
-| Local-odometry drift, 3 loops (168 m) | **0.9 m** (raw wheel odometry: 17 m) |
-| Local-stream max step across the 8.5 m anchor snap | **4.3 cm** (corrections stay in `map→odom`) |
+| Local-stream max step, 3 loops (all corrections in `map→odom`) | **4.0 cm** |
+| Monocular VO scale accuracy (path length vs ground truth) | **0.97** (heading drifts uncorrected — fused loose) |
 | Unsurveyed-marker landmark convergence | **6–8 cm** from sightings alone |
 | LiDAR-core throughput | 10 Hz, 6–12 ms/scan |
 
@@ -133,10 +137,12 @@ generated from a recorded bag by [`scripts/plot_results.py`](scripts/plot_result
 
 ![Absolute position error over time](media/error_time.png)
 
-The map frame starts spawn-relative (8.5 m offset); the first fiducial sighting
-snaps the whole trajectory into the surveyed world frame, after which error
-stays bounded — dipping to millimetres at each corner marker and never
-accumulating across the three loops.
+Here the robot starts beside a corner marker, so the estimate is anchored into
+the world frame from the first keyframe and holds ~2 cm throughout — dipping to
+millimetres at each corner marker and never accumulating across the three loops.
+(When the robot instead starts far from every marker, the first sighting is a
+one-time multi-metre snap into the surveyed frame; that jump lands entirely in
+`map→odom`, never in the smooth local stream.)
 
 ### The REP-105 split — smooth local odometry for Nav2
 
@@ -159,6 +165,32 @@ bias stays bounded near zero (the sim IMU has negligible true bias). In a
 fault-injection test, a 0.02 rad/s bias stepped on mid-run — invisible to the
 stationary startup estimate — is recovered online to **0.0197 rad/s within
 ~25 s**, something a loosely-coupled filter cannot do.
+
+### Monocular visual odometry — the weakest modality, safely fused
+
+<p align="center">
+<img src="media/vo_camera_features.png" width="88%" alt="Camera frames with detected Shi-Tomasi corners across the textured maze">
+</p>
+
+The `vo` modality runs a standard monocular pipeline (Shi-Tomasi + KLT → essential
+matrix → `recoverPose`, keyframe-parallax gating, translation scaled by wheel
+odometry). For it to have anything to track, the maze carries **image textures,
+wall paintings and 3-D props** — the frames above show the hundreds of corners it
+locks onto per frame; the WhyCode markers sit on **white backing panels** so the
+detector still segments them against the busy walls.
+
+![Monocular VO vs ground truth](media/vo_trajectory.png)
+
+VO measures the right *distances* — its path length is **97 %** of ground truth —
+but, like any uncorrected monocular VO, it **drifts in heading** (the pinwheeling
+squares), worst at the in-place corner turns where pure rotation makes the
+essential matrix ill-conditioned. That is exactly why it enters the graph as a
+**loose, robust** between factor. An A/B on the same route: with *tight* sigmas
+VO's drift fights the marker anchor and blows the world-frame estimate to **29 m**;
+with loose sigmas the steady-state ATE is **1.9 cm with VO on vs 3.6 cm with VO
+off** — i.e. VO on is *not worse* than VO off. VO earns its keep as redundant
+motion during a LiDAR dropout, not as a primary constraint. (Reducing the raw drift — camera pitch, a homography fallback for
+in-place turns — is a possible future improvement; the fusion does not need it.)
 
 ### Robustness (fault injection)
 

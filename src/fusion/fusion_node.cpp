@@ -83,6 +83,10 @@ void FusionNode::declareParameters()
     declare_parameter("use_vo", false);
     declare_parameter("vo_topic", "/olive/visual_odom");
     declare_parameter("vo_between_sigmas", std::vector<double>{ 0.1, 0.1, 1.0, 1.0, 1.0, 0.1 });
+    // VO publishes sparsely (only when parallax + wheel-scale gates pass), so the
+    // VO buffer needs a wider interpolation slack than wheels to bracket keyframe
+    // stamps; too tight and every VO between-factor is silently dropped.
+    declare_parameter("vo_buffer_slack_s", 0.25);
     declare_parameter("use_markers", true);
     declare_parameter("marker_topic", "/whycode/poses");
     declare_parameter("camera_translation", std::vector<double>{ 0.2, 0.0, 0.06 });
@@ -228,6 +232,7 @@ void FusionNode::loadConfiguration()
     const auto vo_sigmas = get_parameter("vo_between_sigmas").as_double_array();
     for (size_t i = 0; i < 6 && i < vo_sigmas.size(); ++i)
         vo_between_sigmas_[i] = vo_sigmas[i];
+    vo_buffer_.setInterpolationSlack(get_parameter("vo_buffer_slack_s").as_double());
 
     use_markers_  = get_parameter("use_markers").as_bool();
     marker_topic_ = get_parameter("marker_topic").as_string();
@@ -523,6 +528,7 @@ FusionNode::CallbackReturn FusionNode::on_activate(const rclcpp_lifecycle::State
                 const double stamp =
                     static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec;
                 vo_buffer_.push(stamp, gtsam_conversions::toGtsamPose(msg->pose.pose));
+                health_monitor_.beat("vo", stamp);
             });
     if (use_markers_)
         marker_sub_ = create_subscription<whycode_vision::msg::WhyCodePoseArray>(
@@ -1140,7 +1146,22 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
             // loose z/roll/pitch, robustified against tracking failures.
             const auto vo_relative = vo_buffer_.relativePose(previous_stamp, features_.stamp);
             if (vo_relative)
+            {
                 pose_graph_->addOdometryFactor(*vo_relative, vo_between_sigmas_, true);
+                ++vo_factors_added_;
+            }
+            else
+            {
+                ++vo_factors_skipped_;
+            }
+            // Keyframe rate (~1 Hz), not a sensor hot path -> throttled log is fine.
+            RCLCPP_INFO_THROTTLE(
+                get_logger(),
+                *get_clock(),
+                5000,
+                "VO between-factors: %zu added, %zu skipped (buffer coverage)",
+                vo_factors_added_,
+                vo_factors_skipped_);
         }
         if (use_planar_prior_)
             pose_graph_->addPlanarPrior(planar_prior_sigmas_);

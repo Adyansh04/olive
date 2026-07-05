@@ -84,6 +84,8 @@ def main():
     ap.add_argument("--fused-topic", default="/olive/odometry")
     ap.add_argument("--gt-topic", default="/ground_truth")
     ap.add_argument("--wheel-topic", default="/odom")
+    ap.add_argument("--vo-topic", default="/olive/visual_odom",
+                    help="monocular VO stream; reported as a wheel-scaled, bounded-drift check")
     ap.add_argument("--local-topic", default="/olive/odometry_local",
                     help="smooth odom-frame stream; checked for continuity (no jumps)")
     ap.add_argument("--max-step", type=float, default=0.0,
@@ -92,11 +94,12 @@ def main():
                     help="error (m) below which the trajectory is considered world-anchored")
     args = ap.parse_args()
 
-    want = {args.fused_topic, args.gt_topic, args.wheel_topic, args.local_topic, "/tf"}
+    want = {args.fused_topic, args.gt_topic, args.wheel_topic, args.vo_topic,
+            args.local_topic, "/tf"}
     reader, tmp = open_reader(args.bag)
     try:
         types = {t.name: t.type for t in reader.get_all_topics_and_types()}
-        gt, fused, wheel, local, map_odom = [], [], [], [], []
+        gt, fused, wheel, local, vo, map_odom = [], [], [], [], [], []
         first = {}
         while reader.has_next():
             topic, data, _ = reader.read_next()
@@ -113,14 +116,18 @@ def main():
             rec = (stamp_s(msg.header), p.x, p.y, yaw_of(msg.pose.pose.orientation))
             if topic not in first:
                 first[topic] = (msg.header.frame_id, msg.child_frame_id, p.x, p.y)
-            (gt if topic == args.gt_topic else fused if topic == args.fused_topic
-             else local if topic == args.local_topic else wheel).append(rec)
+            if topic == args.vo_topic:
+                vo.append(rec)
+            else:
+                (gt if topic == args.gt_topic else fused if topic == args.fused_topic
+                 else local if topic == args.local_topic else wheel).append(rec)
     finally:
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)
 
     print("=== FRAME IDS + first position ===")
-    for t in (args.gt_topic, args.wheel_topic, args.fused_topic, args.local_topic):
+    for t in (args.gt_topic, args.wheel_topic, args.fused_topic, args.local_topic,
+              args.vo_topic):
         f = first.get(t)
         if f:
             print(f"  {t:22s} frame_id={f[0]!r:10s} child={f[1]!r:16s} "
@@ -189,6 +196,30 @@ def main():
         print("\n=== WHEEL odom (spawn-relative; expected NOT to match world GT) ===")
         print(f"  first_xy=({wheel[0][1]:+.2f},{wheel[0][2]:+.2f})  "
               f"last_xy=({wheel[-1][1]:+.2f},{wheel[-1][2]:+.2f})")
+
+    # VO is wheel-scaled + planar and only publishes when its parallax/wheel-motion
+    # gates pass. Health = it produced updates, its path length tracks ground truth
+    # (scale is right), and start-aligned drift is bounded (it is the weakest,
+    # non-anchored modality, so drift - not marker accuracy - is the bar).
+    if vo:
+        vo.sort()
+
+        def path_len(seq):
+            return sum(math.hypot(b[1] - a[1], b[2] - a[2]) for a, b in zip(seq, seq[1:]))
+
+        vo_len, gt_len = path_len(vo), path_len(gt)
+        gx0, gy0 = gt[0][1], gt[0][2]
+        vx0, vy0 = vo[0][1], vo[0][2]
+        drift = math.hypot((vo[-1][1] - vx0) - (gt[-1][1] - gx0),
+                           (vo[-1][2] - vy0) - (gt[-1][2] - gy0))
+        print("\n=== MONOCULAR VO (wheel-scaled, vo_odom frame) ===")
+        print(f"  updates: {len(vo)}   path length: {vo_len:.1f} m   "
+              f"(ground-truth path {gt_len:.1f} m, ratio {vo_len / gt_len:.2f})"
+              if gt_len > 0 else f"  updates: {len(vo)}   path length: {vo_len:.1f} m")
+        print(f"  start-aligned final drift vs ground truth: {drift:.2f} m")
+    else:
+        print(f"\n=== MONOCULAR VO ===\n  no {args.vo_topic} samples "
+              f"(vo modality off, or no trackable features)")
 
     if not continuity_ok:
         raise SystemExit(1)
