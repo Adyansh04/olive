@@ -5,7 +5,7 @@
 One iSAM2 keyframe graph fuses LiDAR, IMU (tightly coupled), wheel encoders, WhyCode fiducials and monocular visual odometry, with ICP loop closure. It produces both a globally-accurate map-frame pose and a smooth, jump-free odom-frame stream — a drop-in localization backend for Nav2.
 
 <p align="center">
-<img src="media/trajectory.png" width="49%" alt="Fused trajectory vs ground truth over 3 maze loops (2.1 cm RMSE)">
+<img src="media/trajectory.png" width="49%" alt="Fused trajectory vs ground truth over 3 maze loops (2.3 cm RMSE)">
 <img src="media/local_vs_wheel.png" width="49%" alt="Smooth local odometry stays tight while raw wheel odometry drifts">
 </p>
 
@@ -124,12 +124,12 @@ the monocular VO front-end. Figures are generated from a recorded bag by
 
 | Metric | Value |
 |--------|-------|
-| Absolute trajectory error (post-anchor, vs ground truth) | **2.1 cm RMSE**, 4.1 cm max |
-| Fused ATE, VO on vs off (steady-state) | **1.9 cm vs 3.6 cm** — VO on is not worse (tight-sigma VO: 29 m) |
+| Absolute trajectory error (post-anchor, vs ground truth) | **2.3 cm RMSE**, 4.8 cm max |
+| Fused ATE, VO on vs off (steady-state) | **~2 cm vs 3.6 cm** — VO on is not worse (tight-sigma VO: 29 m) |
 | Drive-test relative accuracy (35 s multi-turn) | **1.4 cm / 0.22°** |
 | First-anchor drift reset (spawn frame → world) | 8.5 m → few cm, one sighting |
-| Local-stream max step, 3 loops (all corrections in `map→odom`) | **4.0 cm** |
-| Monocular VO scale accuracy (path length vs ground truth) | **0.97** (heading drifts uncorrected — fused loose) |
+| Local-stream max step, 3 loops (all corrections in `map→odom`) | **4.2 cm** |
+| Monocular VO scale accuracy (path length vs ground truth) | **0.98** (heading drifts uncorrected — fused loose) |
 | Unsurveyed-marker landmark convergence | **6–8 cm** from sightings alone |
 | LiDAR-core throughput | 10 Hz, 6–12 ms/scan |
 
@@ -137,12 +137,11 @@ the monocular VO front-end. Figures are generated from a recorded bag by
 
 ![Absolute position error over time](media/error_time.png)
 
-Here the robot starts beside a corner marker, so the estimate is anchored into
-the world frame from the first keyframe and holds ~2 cm throughout — dipping to
-millimetres at each corner marker and never accumulating across the three loops.
-(When the robot instead starts far from every marker, the first sighting is a
-one-time multi-metre snap into the surveyed frame; that jump lands entirely in
-`map→odom`, never in the smooth local stream.)
+The map frame starts spawn-relative (~8.5 m offset); the first fiducial sighting
+snaps the whole trajectory into the surveyed world frame, after which error stays
+bounded — dipping to millimetres at each corner marker and never accumulating
+across the three loops. That multi-metre snap lands entirely in `map→odom`, never
+in the smooth local stream a controller consumes.
 
 ### The REP-105 split — smooth local odometry for Nav2
 
@@ -181,13 +180,13 @@ detector still segments them against the busy walls.
 
 ![Monocular VO vs ground truth](media/vo_trajectory.png)
 
-VO measures the right *distances* — its path length is **97 %** of ground truth —
+VO measures the right *distances* — its path length is **98 %** of ground truth —
 but, like any uncorrected monocular VO, it **drifts in heading** (the pinwheeling
 squares), worst at the in-place corner turns where pure rotation makes the
 essential matrix ill-conditioned. That is exactly why it enters the graph as a
 **loose, robust** between factor. An A/B on the same route: with *tight* sigmas
 VO's drift fights the marker anchor and blows the world-frame estimate to **29 m**;
-with loose sigmas the steady-state ATE is **1.9 cm with VO on vs 3.6 cm with VO
+with loose sigmas the steady-state ATE is **~2 cm with VO on vs 3.6 cm with VO
 off** — i.e. VO on is *not worse* than VO off. VO earns its keep as redundant
 motion during a LiDAR dropout, not as a primary constraint. (Reducing the raw drift — camera pitch, a homography fallback for
 in-place turns — is a possible future improvement; the fusion does not need it.)

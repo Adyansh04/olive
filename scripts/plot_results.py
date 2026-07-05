@@ -144,14 +144,18 @@ fig.savefig(os.path.join(OUT, "trajectory.png"))
 plt.close(fig)
 
 # ---------------------------------------------------------------- Fig 2: smooth local vs raw wheel (odom frame)
-# Both streams live in the odom frame, which accumulates from sim start; shift
-# each to its own run-start so the comparison is the RELATIVE drift over the run
-# (fair no matter how much either stream had already drifted before recording).
+# /odom (Gazebo diff-drive) and /olive/odometry_local (OLIVE) are independent odom
+# estimates with different frame origins, so centre each trajectory on its centroid
+# to overlay the SHAPES: the fused local stream is a tight repeatable square; raw
+# wheel dead-reckoning drifts/rotates around it.
+def centre(series):
+    mx = sum(r[1] for r in series) / len(series)
+    my = sum(r[2] for r in series) / len(series)
+    return [r[1] - mx for r in series], [r[2] - my for r in series]
+
 fig, ax = plt.subplots(figsize=(6.4, 6.2))
-wx0, wy0 = wheel[0][1], wheel[0][2]
-lx0, ly0 = local[0][1], local[0][2]
-wxr = [x - wx0 for _, x, _ in wheel]; wyr = [y - wy0 for _, _, y in wheel]
-lxr = [x - lx0 for _, x, _ in local]; lyr = [y - ly0 for _, _, y in local]
+wxr, wyr = centre(wheel)
+lxr, lyr = centre(local)
 ax.plot(wxr, wyr, color=C_WHEEL, lw=1.6, label="raw wheel  /odom  (dead-reckoning)")
 ax.plot(lxr, lyr, color=C_LOCAL, lw=1.6, label="OLIVE local  /olive/odometry_local")
 ax.scatter([wxr[-1]], [wyr[-1]], s=60, c=C_WHEEL, zorder=5, edgecolors="white")
