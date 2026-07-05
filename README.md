@@ -9,11 +9,17 @@ One incremental (iSAM2) keyframe pose graph fuses every modality; each source is
 | Modality | Role | Enters the graph as |
 |----------|------|---------------------|
 | LiDAR + IMU (`lio`) | backbone odometry: curvature features → scan-to-map Gauss-Newton, gyro-seeded | between factor per keyframe |
-| Wheel odometry (`wheel`) | metric-scale anchor; owns `odom→base` (REP-105) | between factor (tight x/y, loose yaw) |
-| WhyCode fiducials (`markers`) | global anchoring / drift reset — **position-only** (x, y, z; orientation is never used) | robust unary anchor factor |
+| IMU (tight coupling) | preintegrated rotation constraint + **online gyro/accel bias estimation** (`imu_preintegration`) | `CombinedImuFactor` chain over `V(i)`/`B(i)` states |
+| Wheel odometry (`wheel`) | metric-scale anchor | between factor (tight x/y, loose yaw) |
+| WhyCode fiducials (`markers`) | **landmark variables `L(id)`** (TagSLAM-style): surveyed ids anchor the world frame, any other repeatedly-sighted marker acts as an odometry constraint — position-only, orientation never used | robust binary observation factor (+ position prior for surveyed ids) |
 | Monocular camera (`vo`) | auxiliary wheel-scaled KLT visual odometry (default off) | robust between factor |
 
-A soft planar prior pins z / roll / pitch (ground motion). The fused estimate is published on `/olive/odometry` in the `map` frame; the node broadcasts only the `map→odom` correction, so global updates never teleport the robot in the odom frame. Known markers act like local GPS fixes: the `X(0)` prior is deliberately loose, and the first accepted marker sighting bends the whole trajectory into the surveyed world frame.
+A soft planar prior pins z / roll / pitch (ground motion). Two odometry outputs implement the REP-105 split end-to-end:
+
+- **`/olive/odometry`** (map frame) — the globally-accurate graph estimate; marker anchors and loop closures jump HERE via the `map→odom` correction.
+- **`/olive/odometry_local`** (odom frame, ~50 Hz) — a continuous, jump-free stream built from scan-match increments + wheel + gyro, with the matching `odom→base_footprint` TF (`publish_odom_tf`). This is what a local controller (Nav2) should consume: `map→odom` absorbs every global correction, so the local stream never teleports.
+
+Known markers act like local GPS fixes: the `X(0)` prior is deliberately loose, and the first accepted marker sighting bends the whole trajectory into the surveyed world frame.
 
 The LiDAR-inertial core follows the architecture of [LIO-SAM](https://github.com/TixiaoShan/LIO-SAM), used as a design reference; the implementation here is written for this project (organized 16-ring clouds, eigen-based plane fits with a collinearity gate, planar-motion handling, coarse-azimuth feature windows) and heavily modified around the marker-anchoring backend. Marker detection uses [whycode](https://github.com/Adyansh04/whycode).
 
@@ -67,10 +73,29 @@ hardware templates with TODO-marked calibration values. The order that works:
 6. Survey marker world positions (z is in the MAP frame — origin at
    base_link start height, not the floor) into `known_marker_positions`.
 
+7. **odom→base TF ownership** — `publish_odom_tf: false` keeps your base
+   driver's TF (this node only broadcasts `map→odom`). To let Nav2 consume
+   the fused local odometry, disable the driver's TF and flip the flag:
+   exactly ONE node may publish `odom→base`.
+8. **IMU tight coupling** — after the basics work, calibrate the IMU noise
+   sigmas (datasheet or Allan variance) and set `imu_preintegration: true`;
+   verify by plotting `/olive/debug/bias` (the online estimate should sit
+   near the stationary-init value and track slow drift).
+
 Real LiDAR notes: unorganized (`height==1`) clouds need a `ring` field;
 per-point time fields (`time`/`t`/`timestamp`) enable gyro deskew.
 LiDAR dropouts are coasted on wheel odometry with `/diagnostics` reporting;
 loop closure corrects drift on revisits when markers are out of view.
+
+### Nav2 wiring (drop-in AMCL replacement)
+
+This node fills the AMCL slot: it owns `map→odom` (and, with
+`publish_odom_tf`, the smooth `odom→base_footprint`). Point the Nav2
+controller's `odom_topic` at **`/olive/odometry_local`** and keep the
+global/local costmap frames at `map`/`odom` as usual; drop AMCL from the
+bringup. Localize before you navigate: until the first surveyed marker is
+sighted the map frame is spawn-relative (the first anchor is a one-time
+multi-metre `map→odom` jump).
 
 ## Tests
 
@@ -83,7 +108,9 @@ colcon test --packages-select olive   # covariance conventions, scan matcher on
 ## Results (Gazebo Harmonic, maze world, headless)
 
 - LiDAR-inertial core: 10 Hz, 6–12 ms/scan; 35 s multi-turn run **1.1 cm / 0.13°** endpoint error vs ground truth, ~1 mm stationary jitter.
-- With wheel factors + planar prior: **1.1 cm / 0.30°**, full REP-105 TF tree.
-- Marker drift reset: an 8.49 m map-frame offset snaps to **0.06 m absolute** on the first marker sighting; full-trajectory ATE after anchoring: **0.061 m RMSE, max 0.113 m** (with loop closure active).
+- Full stack (landmarks + tight IMU coupling + wheel + loop closure): drive test **1.4 cm / 0.22°**; full-trajectory ATE after anchoring **0.056 m RMSE** (repeatable).
+- Smooth-odometry split: across the 8.49 m first-anchor snap the `map→odom` correction jumps 8.5 m while `/olive/odometry_local`'s largest step stays **3–4 cm** — global corrections never reach the odom frame.
+- Marker landmarks: unsurveyed markers converge to **6–8 cm** of their true positions from sightings alone; during a 25 s LiDAR blackout, marker observations pull the coasted trajectory back to **1.1 cm** final error (markers off: 4.9 m, never recovers).
+- IMU tight coupling: a 0.02 rad/s gyro-bias step injected mid-run is estimated online to **0.0197 rad/s within ~25 s** and tracked thereafter (`/olive/debug/bias`).
 - Loop closure: under artificially induced drift (crippled matcher, no wheel factors), an out-and-back route improves from 4.44 m to **0.39 m** final error (11×).
 - LiDAR outage (fault-injected): output and TF continue on wheel coasting with `/diagnostics` reporting, cross-track and yaw re-lock on recovery; 10-minute endurance drive with bounded cloud storage ends 1–2 cm from ground truth.
