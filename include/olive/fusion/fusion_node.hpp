@@ -113,8 +113,11 @@ private:
     FactorSigmas                           vo_between_sigmas_{};
     std::string                            marker_topic_;
     gtsam::Pose3                           base_from_camera_;
-    double                                 marker_sigma_m_      = 0.10;
-    double                                 marker_stamp_window_ = 0.25;
+    double                                 marker_sigma_m_        = 0.10;
+    double                                 marker_stamp_window_   = 0.25;
+    bool                                   marker_landmark_mode_  = true;
+    double                                 marker_survey_sigma_m_ = 0.05;
+    bool                                   world_anchored_        = false;
     std::unordered_map<int, gtsam::Point3> known_markers_;
 
     // Debug toggles (live-updatable via `ros2 param set`)
@@ -241,12 +244,12 @@ private:
     double                        last_loop_attempt_    = -1.0;
 
     // Debug state
-    nav_msgs::msg::Path             debug_path_msg_;
-    geometry_msgs::msg::PoseArray   debug_keyframes_msg_;
-    Cloud                           debug_scan_cloud_;    ///< reused transform buffer
-    std::unordered_map<int, double> anchor_event_times_;  ///< marker id -> last anchor stamp
-    Cloud::Ptr                      last_edge_map_;
-    Cloud::Ptr                      last_planar_map_;
+    nav_msgs::msg::Path                      debug_path_msg_;
+    geometry_msgs::msg::PoseArray            debug_keyframes_msg_;
+    Cloud                                    debug_scan_cloud_;    ///< reused transform buffer
+    std::unordered_map<int64_t, double>      anchor_event_times_;  ///< landmark key -> last stamp
+    Cloud::Ptr                               last_edge_map_;
+    Cloud::Ptr                               last_planar_map_;
     OnSetParametersCallbackHandle::SharedPtr param_callback_;
 };
 

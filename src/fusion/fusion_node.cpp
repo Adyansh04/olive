@@ -92,6 +92,10 @@ void FusionNode::declareParameters()
     declare_parameter("marker_min_track_frames", 3);
     declare_parameter("known_marker_ids", std::vector<int64_t>{});
     declare_parameter("known_marker_positions", std::vector<double>{});
+    declare_parameter("marker_mode", "landmark");
+    declare_parameter("marker_survey_sigma_m", 0.05);
+    declare_parameter("marker_accept_unknown_ids", false);
+    declare_parameter("marker_accept_undecoded_ids", false);
 
     declare_parameter("lidar_translation", std::vector<double>{ 0.0, 0.0, 0.145 });
     declare_parameter("lidar_rpy", std::vector<double>{ 0.0, 0.0, 0.0 });
@@ -222,16 +226,30 @@ void FusionNode::loadConfiguration()
         gtsam::Rot3::Ypr(cam_rpy[2], cam_rpy[1], cam_rpy[0]),
         gtsam::Point3(cam_t[0], cam_t[1], cam_t[2]));
 
-    marker_sigma_m_      = get_parameter("marker_position_sigma_m").as_double();
-    marker_stamp_window_ = get_parameter("marker_stamp_window_s").as_double();
+    marker_sigma_m_        = get_parameter("marker_position_sigma_m").as_double();
+    marker_stamp_window_   = get_parameter("marker_stamp_window_s").as_double();
+    marker_landmark_mode_  = get_parameter("marker_mode").as_string() != "anchor";
+    marker_survey_sigma_m_ = get_parameter("marker_survey_sigma_m").as_double();
 
     MarkerGateConfig gate_config;
     gate_config.min_range = get_parameter("marker_min_range_m").as_double();
     gate_config.max_range = get_parameter("marker_max_range_m").as_double();
     gate_config.min_track_frames =
         static_cast<int>(get_parameter("marker_min_track_frames").as_int());
+    // Free landmarks (unsurveyed / undecoded) only exist in landmark mode;
+    // the legacy anchor path can only consume surveyed ids.
+    gate_config.accept_unknown_ids =
+        marker_landmark_mode_ && get_parameter("marker_accept_unknown_ids").as_bool();
+    gate_config.accept_undecoded_ids =
+        marker_landmark_mode_ && get_parameter("marker_accept_undecoded_ids").as_bool();
 
     known_markers_.clear();
+    // Free landmarks initialized before the first survey anchor would lock in
+    // the spawn-frame gauge and then fight the anchor snap (a gauge conflict
+    // that can fold the map). They are held back until the trajectory is
+    // world-anchored — unless nothing is surveyed, in which case the spawn
+    // gauge is the only gauge and there is no conflict.
+    world_anchored_      = false;
     const auto ids       = get_parameter("known_marker_ids").as_integer_array();
     const auto positions = get_parameter("known_marker_positions").as_double_array();
     for (size_t i = 0; i < ids.size() && i * 3 + 2 < positions.size(); ++i)
@@ -242,6 +260,8 @@ void FusionNode::loadConfiguration()
             gtsam::Point3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]));
         gate_config.known_ids.insert(id);
     }
+    if (known_markers_.empty())
+        world_anchored_ = true;  // no surveys: the spawn gauge is the gauge
     marker_gate_ = std::make_unique<MarkerGate>(gate_config);
 
     if (get_parameter("extrinsics_from_tf").as_bool())
@@ -1068,18 +1088,46 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
         if (use_planar_prior_)
             pose_graph_->addPlanarPrior(planar_prior_sigmas_);
 
-        int anchors = 0;
+        int  anchors             = 0;
+        bool surveyed_this_round = false;
         if (use_markers_)
         {
             for (const MarkerObservation& obs :
                  marker_gate_->collectNear(features_.stamp, marker_stamp_window_))
             {
-                pose_graph_->addMarkerAnchor(
-                    obs.position_in_camera,
-                    known_markers_.at(obs.marker_id),
-                    base_from_camera_,
-                    marker_sigma_m_);
-                anchor_event_times_[obs.marker_id] = features_.stamp;
+                if (marker_landmark_mode_)
+                {
+                    // TagSLAM-style: the marker is a landmark variable.
+                    // Surveyed ids carry a world prior (anchoring); everything
+                    // else is a free landmark whose repeated sightings act as
+                    // an odometry constraint.
+                    const auto survey =
+                        obs.decoded ? known_markers_.find(obs.marker_id) : known_markers_.end();
+                    const bool surveyed = survey != known_markers_.end();
+                    // Gauge guard: a free landmark initialized before the
+                    // first survey anchor encodes the spawn frame and later
+                    // fights the anchor snap — hold free landmarks back until
+                    // the trajectory is world-anchored.
+                    if (!surveyed && !world_anchored_)
+                        continue;
+                    surveyed_this_round = surveyed_this_round || surveyed;
+                    pose_graph_->addMarkerObservation(
+                        obs.landmark_key_id,
+                        obs.position_in_camera,
+                        base_from_camera_,
+                        marker_sigma_m_,
+                        surveyed ? std::optional<gtsam::Point3>(survey->second) : std::nullopt,
+                        marker_survey_sigma_m_);
+                }
+                else
+                {
+                    pose_graph_->addMarkerAnchor(
+                        obs.position_in_camera,
+                        known_markers_.at(obs.marker_id),
+                        base_from_camera_,
+                        marker_sigma_m_);
+                }
+                anchor_event_times_[obs.landmark_key_id] = features_.stamp;
                 ++anchors;
             }
         }
@@ -1112,6 +1160,8 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
             return;
         }
         const bool corrected = result == PoseGraph::OptimizeResult::CORRECTED;
+        if (surveyed_this_round)
+            world_anchored_ = true;  // gauge fixed: free landmarks may enter
 
         const gtsam::Pose3 optimized = pose_graph_->latestPose();
         Cloud::Ptr         edge_copy(new Cloud(*features_.edge));
@@ -1128,7 +1178,7 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
             refreshAfterCorrection();
             RCLCPP_INFO(
                 get_logger(),
-                "Marker anchor applied (%d observation%s) - trajectory corrected",
+                "Global correction applied (%d marker observation%s) - trajectory corrected",
                 anchors,
                 anchors == 1 ? "" : "s");
         }
@@ -1534,6 +1584,69 @@ void FusionNode::publishFiducialDebug(double stamp)
             clear.id              = id;
             clear.action          = visualization_msgs::msg::Marker::DELETE;
             array.markers.push_back(clear);
+        }
+    }
+
+    // Landmark estimates (landmark mode): orange spheres at the optimized
+    // positions; surveyed ids get an error segment to their survey, free
+    // landmarks a "(free)" label. Convergence is visible live.
+    if (marker_landmark_mode_ && pose_graph_)
+    {
+        for (const auto& [id, estimate] : pose_graph_->landmarks())
+        {
+            visualization_msgs::msg::Marker sphere;
+            sphere.header.frame_id    = map_frame_;
+            sphere.header.stamp       = ros_stamp;
+            sphere.ns                 = "landmark_estimates";
+            sphere.id                 = static_cast<int>(id);
+            sphere.type               = visualization_msgs::msg::Marker::SPHERE;
+            sphere.action             = visualization_msgs::msg::Marker::ADD;
+            sphere.pose.position.x    = estimate.x();
+            sphere.pose.position.y    = estimate.y();
+            sphere.pose.position.z    = estimate.z();
+            sphere.pose.orientation.w = 1.0;
+            sphere.scale.x = sphere.scale.y = sphere.scale.z = 0.2;
+            sphere.color.r                                   = 1.0F;
+            sphere.color.g                                   = 0.6F;
+            sphere.color.b                                   = 0.1F;
+            sphere.color.a                                   = 0.9F;
+            array.markers.push_back(sphere);
+
+            const bool undecoded = id >= UNDECODED_LANDMARK_BASE;
+            const auto survey =
+                undecoded ? known_markers_.end() : known_markers_.find(static_cast<int>(id));
+            if (survey != known_markers_.end())
+            {
+                visualization_msgs::msg::Marker error_line = sphere;
+                error_line.ns                              = "landmark_error";
+                error_line.type               = visualization_msgs::msg::Marker::LINE_LIST;
+                error_line.scale.x            = 0.02;
+                error_line.pose               = geometry_msgs::msg::Pose();
+                error_line.pose.orientation.w = 1.0;
+                geometry_msgs::msg::Point a;
+                a.x = estimate.x();
+                a.y = estimate.y();
+                a.z = estimate.z();
+                geometry_msgs::msg::Point b;
+                b.x               = survey->second.x();
+                b.y               = survey->second.y();
+                b.z               = survey->second.z();
+                error_line.points = { a, b };
+                array.markers.push_back(error_line);
+            }
+            else
+            {
+                visualization_msgs::msg::Marker label = sphere;
+                label.ns                              = "landmark_labels";
+                label.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+                label.text = undecoded ? "track " + std::to_string(id - UNDECODED_LANDMARK_BASE) +
+                                             " (free)" :
+                                         "id " + std::to_string(id) + " (free)";
+                label.pose.position.z += 0.3;
+                label.scale.z = 0.2;
+                label.color.r = label.color.g = label.color.b = 1.0F;
+                array.markers.push_back(label);
+            }
         }
     }
     debug_fiducials_pub_->publish(array);

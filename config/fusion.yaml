@@ -174,7 +174,21 @@ fusion_node:
     relinearize_threshold: 0.1
     relinearize_skip: 1
 
-    # WhyCode fiducial anchoring (position-only; orientation is never used)
+    # WhyCode fiducials (position-only; orientation is never used).
+    # marker_mode landmark = TagSLAM-style: markers are Point3 VARIABLES in
+    # the graph. Surveyed ids get a world-position prior (anchoring); any
+    # other accepted marker is a free landmark whose repeated sightings
+    # constrain relative motion — an odometry source. "anchor" restores the
+    # legacy unary factor (surveyed ids only).
+    marker_mode: landmark
+    # World-prior sigma for surveyed ids. The sim survey is exact, so pin it
+    # tight (0.01 -> ATE 0.054 RMSE, beats the legacy anchor's 0.059); looser
+    # values let the landmark absorb detector bias, trading RMSE for a lower
+    # worst-case (0.02 -> RMSE 0.071 / max 0.110). Match YOUR survey accuracy.
+    marker_survey_sigma_m: 0.01
+    marker_accept_unknown_ids: true    # decoded but unsurveyed -> free landmark
+    marker_accept_undecoded_ids: true  # id bits failed -> tracking-id landmark
+                                       # (circle-fit position is still good)
     marker_topic: /whycode/poses
     # The detector reports marker positions in the camera_link body frame
     # (x forward, y left, z up) — NOT the optical convention.

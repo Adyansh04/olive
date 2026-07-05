@@ -6,10 +6,16 @@
 #ifndef OLIVE_FUSION_POSE_GRAPH_HPP_
 #define OLIVE_FUSION_POSE_GRAPH_HPP_
 
+#include <gtsam/geometry/Point3.h>
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/nonlinear/ISAM2.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 
+#include <cstdint>
+#include <optional>
+#include <set>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace olive
@@ -60,8 +66,10 @@ public:
      *
      * Call after addKeyframe() and before optimize().
      */
-    void addOdometryFactor(const gtsam::Pose3& relative, const FactorSigmas& sigmas,
-                           bool robust = false);
+    void addOdometryFactor(
+        const gtsam::Pose3& relative,
+        const FactorSigmas& sigmas,
+        bool                robust = false);
 
     /**
      * @brief Softly pin z, roll and pitch of the newest keyframe to zero
@@ -75,8 +83,8 @@ public:
      * Marks the round as a global correction so the caller refreshes the
      * keyframe map, exactly like marker anchors.
      */
-    void addLoopFactor(size_t old_index, size_t new_index, const gtsam::Pose3& relative,
-                       double sigma);
+    void
+        addLoopFactor(size_t old_index, size_t new_index, const gtsam::Pose3& relative, double sigma);
 
     /**
      * @brief Anchor the newest keyframe to a known marker (position only)
@@ -90,6 +98,37 @@ public:
         const gtsam::Point3& marker_in_world,
         const gtsam::Pose3&  base_from_camera,
         double               sigma);
+
+    /**
+     * @brief Observe a marker landmark from the newest keyframe (TagSLAM-style)
+     *
+     * The landmark is a Point3 VARIABLE L(id): its first sighting inserts the
+     * value (at the surveyed position when given, else back-projected from
+     * the keyframe pose) and every sighting adds a robust binary factor, so
+     * consecutive sightings constrain the motion between keyframes — markers
+     * act as an odometry source. Surveyed landmarks additionally get a
+     * position prior and mark the round as a global correction; free
+     * landmarks trigger a correction only when re-observed after a gap
+     * (a de-facto loop closure).
+     *
+     * @param landmark_id         Stable landmark key (decoded WhyCode id, or
+     *                            an offset tracking id for undecoded tracks)
+     * @param measured_in_camera  Detected marker position, camera frame
+     * @param base_from_camera    Fixed extrinsic
+     * @param sigma               Isotropic observation sigma (m); robustified
+     * @param surveyed_position   Known world position (map frame), if surveyed
+     * @param survey_sigma        Prior sigma for surveyed landmarks (m)
+     */
+    void addMarkerObservation(
+        int64_t                             landmark_id,
+        const gtsam::Point3&                measured_in_camera,
+        const gtsam::Pose3&                 base_from_camera,
+        double                              sigma,
+        const std::optional<gtsam::Point3>& surveyed_position,
+        double                              survey_sigma);
+
+    /// Committed landmark estimates (id -> optimized position), for debug viz
+    std::vector<std::pair<int64_t, gtsam::Point3>> landmarks() const;
 
     /// Outcome of one incremental update round
     enum class OptimizeResult
@@ -132,9 +171,16 @@ private:
     gtsam::NonlinearFactorGraph pending_factors_;
     gtsam::Values               pending_values_;
     gtsam::Values               current_estimate_;
-    size_t                      num_keyframes_      = 0;
+    size_t                      num_keyframes_       = 0;
     size_t                      committed_keyframes_ = 0;
-    bool                        has_global_factor_  = false;
+    bool                        has_global_factor_   = false;
+
+    // Landmark bookkeeping: pending ids merge into committed on a successful
+    // optimize and are dropped on FAILED (their values roll back with
+    // pending_values_).
+    std::set<int64_t>                   landmark_ids_;
+    std::set<int64_t>                   pending_landmark_ids_;
+    std::unordered_map<int64_t, size_t> landmark_last_seen_kf_;
 };
 
 }  // namespace olive

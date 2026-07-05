@@ -98,6 +98,10 @@ fusion_node:
 
     # --- markers ----------------------------------------------------------
     marker_topic: /whycode/poses
+    marker_mode: landmark                # "anchor" = legacy unary fallback
+    marker_survey_sigma_m: 0.10          # trust your survey accordingly
+    marker_accept_unknown_ids: false     # enable once IDs are verified stable
+    marker_accept_undecoded_ids: false   # conservative on real cameras
     marker_position_sigma_m: 0.15        # real detections are noisier
     marker_stamp_window_s: 0.1
     marker_min_range_m: 0.5

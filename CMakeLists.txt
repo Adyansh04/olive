@@ -154,6 +154,12 @@ if(BUILD_TESTING)
   ament_add_gtest(test_marker_anchor test/test_marker_anchor.cpp)
   target_link_libraries(test_marker_anchor gtsam)
 
+  ament_add_gtest(test_marker_observation test/test_marker_observation.cpp)
+  target_link_libraries(test_marker_observation gtsam)
+
+  ament_add_gtest(test_marker_gate test/test_marker_gate.cpp src/fusion/marker_gate.cpp)
+  target_link_libraries(test_marker_gate gtsam)
+
   ament_add_gtest(test_imu_buffer test/test_imu_buffer.cpp src/fusion/imu_buffer.cpp)
   target_include_directories(test_imu_buffer PRIVATE ${EIGEN3_INCLUDE_DIRS})
 

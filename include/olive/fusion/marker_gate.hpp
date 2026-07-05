@@ -8,6 +8,7 @@
 
 #include <gtsam/geometry/Point3.h>
 
+#include <cstdint>
 #include <deque>
 #include <mutex>
 #include <set>
@@ -17,13 +18,20 @@
 namespace olive
 {
 
+/// Undecoded tracks are keyed by tracking id in a disjoint landmark-id range
+/// so they can never collide with decoded WhyCode ids.
+constexpr int64_t UNDECODED_LANDMARK_BASE = 1'000'000;
+
 /**
  * @brief One accepted marker observation (camera-frame position)
  */
 struct MarkerObservation
 {
-    double        stamp     = 0.0;
-    int           marker_id = -1;
+    double  stamp           = 0.0;
+    int     marker_id       = -1;   ///< decoded WhyCode id (-1 when undecoded)
+    int64_t landmark_key_id = -1;   ///< stable graph key: whycode id, or
+                                    ///< UNDECODED_LANDMARK_BASE + tracking id
+    bool          decoded = false;  ///< id bits decoded and valid
     gtsam::Point3 position_in_camera{ 0.0, 0.0, 0.0 };
 };
 
@@ -32,20 +40,26 @@ struct MarkerObservation
  */
 struct MarkerGateConfig
 {
-    std::set<int> known_ids;               ///< Only these markers anchor the graph
-    double        min_range        = 0.5;  ///< Reject implausibly close detections (m)
-    double        max_range        = 6.0;  ///< Reject weak distant detections (m)
-    int           min_track_frames = 3;    ///< Consecutive frames before a track is trusted
-    double        history          = 2.0;  ///< Observation retention (s)
+    std::set<int> known_ids;                     ///< Surveyed markers (world priors)
+    bool          accept_unknown_ids   = false;  ///< decoded but unsurveyed -> free landmark
+    bool          accept_undecoded_ids = false;  ///< id_valid false -> tracking-id landmark
+    double        min_range            = 0.5;    ///< Reject implausibly close detections (m)
+    double        max_range            = 6.0;    ///< Reject weak distant detections (m)
+    int           min_track_frames     = 3;      ///< Consecutive frames before a track is trusted
+    double        history              = 2.0;    ///< Observation retention (s)
 };
 
 /**
- * @brief Filters raw detector output into trustworthy anchor observations.
+ * @brief Filters raw detector output into trustworthy landmark observations.
  *
  * The detector wire format carries no covariance or confidence, so trust is
- * established here: the decoded ID must be flagged valid and known, the range
- * must be plausible, and the same tracking ID must persist for several
- * consecutive frames before its observations pass.
+ * established here: the range must be plausible and the same tracking ID must
+ * persist for several consecutive frames before its observations pass. Which
+ * detections pass depends on the acceptance class: surveyed ids always do,
+ * decoded-but-unsurveyed and undecoded tracks only when the corresponding
+ * accept flag is set (they become free landmarks — odometry constraints, not
+ * world anchors). The circle-fit position is good even when the ID bits fail
+ * to decode, which is why undecoded tracks are usable at all.
  */
 class MarkerGate
 {
