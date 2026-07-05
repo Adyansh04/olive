@@ -14,7 +14,9 @@
 #include <tf2_ros/transform_broadcaster.h>
 
 #include <diagnostic_msgs/msg/diagnostic_array.hpp>
+#include <geometry_msgs/msg/accel_stamped.hpp>
 #include <geometry_msgs/msg/pose_array.hpp>
+#include <geometry_msgs/msg/vector3_stamped.hpp>
 #include <memory>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
@@ -122,6 +124,7 @@ private:
 
     // Debug toggles (live-updatable via `ros2 param set`)
     bool                  debug_enabled_       = false;
+    bool                  debug_imu_state_     = true;
     bool                  debug_path_          = true;
     bool                  debug_keyframes_     = true;
     bool                  debug_local_map_     = true;
@@ -162,6 +165,11 @@ private:
     gtsam::Pose3                map_from_odom_;  ///< cached correction (jumps live here)
     bool                        map_odom_valid_ = false;
     geometry_msgs::msg::Twist   last_wheel_twist_;
+
+    // IMU tight coupling (preintegration into the graph)
+    bool                                                      imu_preintegration_      = false;
+    double                                                    imu_preint_max_interval_ = 5.0;
+    std::unique_ptr<gtsam::PreintegratedCombinedMeasurements> pim_;
 
     // IMU initialization state
     bool   imu_init_done_           = false;
@@ -209,7 +217,10 @@ private:
     rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::PointCloud2>::SharedPtr
         debug_scan_planars_pub_;
     rclcpp_lifecycle::LifecyclePublisher<visualization_msgs::msg::MarkerArray>::SharedPtr
-                                                      debug_fiducials_pub_;
+        debug_fiducials_pub_;
+    rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::AccelStamped>::SharedPtr debug_bias_pub_;
+    rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr
+                                                      debug_velocity_pub_;
     nav_msgs::msg::Odometry                           odom_msg_;
     nav_msgs::msg::Odometry                           smooth_odom_msg_;
     std::vector<geometry_msgs::msg::TransformStamped> tf_batch_;  ///< reused broadcast buffer

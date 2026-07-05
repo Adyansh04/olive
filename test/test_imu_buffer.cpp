@@ -94,6 +94,47 @@ TEST(ImuBuffer, RateNearReturnsBiasCorrectedRate)
     EXPECT_NEAR(rate.z(), 0.20, 1e-9);
 }
 
+TEST(ImuBuffer, SamplesBetweenReturnsHalfOpenWindow)
+{
+    olive::ImuBuffer buffer;
+    fill(buffer, 1.0, Eigen::Vector3d(0.1, 0.0, 0.0));  // samples at 0.00..1.00
+
+    const auto samples = buffer.samplesBetween(0.20, 0.50);
+    ASSERT_FALSE(samples.empty());
+    // (t0, t1]: the sample AT t0 is excluded, the one at t1 included.
+    EXPECT_GT(samples.front().timestamp, 0.20);
+    EXPECT_LE(samples.back().timestamp, 0.50 + 1e-9);
+    EXPECT_EQ(samples.size(), static_cast<size_t>(30));
+}
+
+TEST(ImuBuffer, SamplesBetweenAppliesMountingRotationToBoth)
+{
+    olive::ImuBuffer buffer;
+    buffer.setMountingRotation(
+        Eigen::Quaterniond(Eigen::AngleAxisd(M_PI_2, Eigen::Vector3d::UnitZ())));
+    // IMU-frame x gyro + x accel: both must come out on base-frame y.
+    buffer.push(sample(0.1, Eigen::Vector3d(0.3, 0.0, 0.0), Eigen::Vector3d(1.0, 0.0, 9.81)));
+
+    const auto samples = buffer.samplesBetween(0.0, 0.2);
+    ASSERT_EQ(samples.size(), 1u);
+    EXPECT_NEAR(samples[0].angular_velocity.y(), 0.3, 1e-9);
+    EXPECT_NEAR(samples[0].linear_acceleration.y(), 1.0, 1e-9);
+    EXPECT_NEAR(samples[0].linear_acceleration.z(), 9.81, 1e-9);
+}
+
+TEST(ImuBuffer, SamplesBetweenIsRawNotBiasCorrected)
+{
+    olive::ImuBuffer      buffer;
+    const Eigen::Vector3d rate(0.05, 0.0, 0.0);
+    fill(buffer, 0.5, rate);
+    buffer.setGyroBias(rate);  // bias == rate: integration would be identity
+
+    const auto samples = buffer.samplesBetween(0.0, 0.5);
+    ASSERT_FALSE(samples.empty());
+    // The preintegrator estimates bias itself, so samples must stay raw.
+    EXPECT_NEAR(samples.front().angular_velocity.x(), 0.05, 1e-9);
+}
+
 }  // namespace
 
 int main(int argc, char** argv)

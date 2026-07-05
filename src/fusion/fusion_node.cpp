@@ -39,6 +39,8 @@ FusionNode::FusionNode(const rclcpp::NodeOptions& options)
                     debug_scan_features_ = p.as_bool();
                 else if (p.get_name() == "debug_fiducials")
                     debug_fiducials_ = p.as_bool();
+                else if (p.get_name() == "debug_imu_state")
+                    debug_imu_state_ = p.as_bool();
             }
             rcl_interfaces::msg::SetParametersResult result;
             result.successful = true;
@@ -106,6 +108,16 @@ void FusionNode::declareParameters()
     declare_parameter("stationary_gyro_thresh_rad_s", 0.02);
     declare_parameter("stationary_wheel_thresh_m", 0.005);
     declare_parameter("gyro_bias_reestimate", false);
+
+    declare_parameter("imu_preintegration", false);
+    declare_parameter("accel_noise_sigma", 0.05);
+    declare_parameter("gyro_noise_sigma", 0.005);
+    declare_parameter("accel_bias_rw_sigma", 0.001);
+    declare_parameter("gyro_bias_rw_sigma", 1.0e-4);
+    declare_parameter("integration_sigma", 1.0e-4);
+    declare_parameter("bias_acc_omega_int", 1.0e-4);
+    declare_parameter("imu_preint_max_interval_s", 5.0);
+    declare_parameter("debug_imu_state", true);
 
     declare_parameter("imu_time_offset_s", 0.0);
     declare_parameter("wheel_time_offset_s", 0.0);
@@ -288,6 +300,33 @@ void FusionNode::loadConfiguration()
     stationary_wheel_thresh_ = get_parameter("stationary_wheel_thresh_m").as_double();
     gyro_bias_reestimate_    = get_parameter("gyro_bias_reestimate").as_bool();
 
+    imu_preintegration_      = get_parameter("imu_preintegration").as_bool();
+    imu_preint_max_interval_ = get_parameter("imu_preint_max_interval_s").as_double();
+    debug_imu_state_         = get_parameter("debug_imu_state").as_bool();
+    if (imu_preintegration_)
+    {
+        // Combined preintegration: accel/gyro white noise + bias random walks
+        // all live inside one 6-key factor. body_P_sensor stays identity —
+        // the buffer already rotates samples into base axes (the translation
+        // lever arm is unmodeled; ~omega^2*r, negligible at this platform's
+        // rates).
+        const auto sq   = [](double v) { return v * v; };
+        auto pim_params = gtsam::PreintegrationCombinedParams::MakeSharedU(constants::GRAVITY);
+        pim_params->accelerometerCovariance =
+            gtsam::I_3x3 * sq(get_parameter("accel_noise_sigma").as_double());
+        pim_params->gyroscopeCovariance =
+            gtsam::I_3x3 * sq(get_parameter("gyro_noise_sigma").as_double());
+        pim_params->integrationCovariance =
+            gtsam::I_3x3 * sq(get_parameter("integration_sigma").as_double());
+        pim_params->biasAccCovariance =
+            gtsam::I_3x3 * sq(get_parameter("accel_bias_rw_sigma").as_double());
+        pim_params->biasOmegaCovariance =
+            gtsam::I_3x3 * sq(get_parameter("gyro_bias_rw_sigma").as_double());
+        pim_params->biasAccOmegaInt =
+            gtsam::I_6x6 * sq(get_parameter("bias_acc_omega_int").as_double());
+        pim_ = std::make_unique<gtsam::PreintegratedCombinedMeasurements>(pim_params);
+    }
+
     imu_time_offset_    = get_parameter("imu_time_offset_s").as_double();
     wheel_time_offset_  = get_parameter("wheel_time_offset_s").as_double();
     camera_time_offset_ = get_parameter("camera_time_offset_s").as_double();
@@ -426,6 +465,11 @@ FusionNode::CallbackReturn FusionNode::on_configure(const rclcpp_lifecycle::Stat
         create_publisher<sensor_msgs::msg::PointCloud2>("/olive/debug/scan_planars", rclcpp::QoS(1));
     debug_fiducials_pub_ =
         create_publisher<visualization_msgs::msg::MarkerArray>("/olive/debug/fiducials", latched);
+    debug_bias_pub_ =
+        create_publisher<geometry_msgs::msg::AccelStamped>("/olive/debug/bias", rclcpp::QoS(10));
+    debug_velocity_pub_ = create_publisher<geometry_msgs::msg::Vector3Stamped>(
+        "/olive/debug/velocity",
+        rclcpp::QoS(10));
     diagnostics_pub_ =
         create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", rclcpp::QoS(10));
 
@@ -486,7 +530,12 @@ FusionNode::CallbackReturn FusionNode::on_activate(const rclcpp_lifecycle::State
             rclcpp::QoS(10),
             [this](whycode_vision::msg::WhyCodePoseArray::SharedPtr msg) { markerCallback(msg); });
 
-    if (gyro_bias_reestimate_)
+    if (gyro_bias_reestimate_ && imu_preintegration_)
+        RCLCPP_WARN(
+            get_logger(),
+            "gyro_bias_reestimate is redundant with imu_preintegration (the graph estimates "
+            "bias online) - skipping the stationary EMA timer");
+    else if (gyro_bias_reestimate_)
         bias_reestimate_timer_ =
             create_wall_timer(std::chrono::seconds(1), [this]() { reestimateGyroBias(); });
 
@@ -536,6 +585,8 @@ FusionNode::CallbackReturn FusionNode::on_cleanup(const rclcpp_lifecycle::State&
     debug_scan_edges_pub_.reset();
     debug_scan_planars_pub_.reset();
     debug_fiducials_pub_.reset();
+    debug_bias_pub_.reset();
+    debug_velocity_pub_.reset();
     preprocessor_.reset();
     feature_extractor_.reset();
     scan_matcher_.reset();
@@ -825,6 +876,12 @@ void FusionNode::bootstrapFirstKeyframe(const FeatureClouds& features)
 {
     const gtsam::Pose3 origin;
     pose_graph_->addFirstKeyframe(origin);
+    if (imu_preintegration_)
+    {
+        // Stationary start (enforced by the IMU init gate): V(0) = 0 and
+        // B(0) seeded with the measured gyro bias.
+        pose_graph_->addImuPriors(imu_buffer_.gyroBias(), 0.1, 0.1, 0.01);
+    }
     if (pose_graph_->optimize() == PoseGraph::OptimizeResult::FAILED)
     {
         RCLCPP_ERROR(get_logger(), "Bootstrap graph update failed - retrying on the next scan");
@@ -1088,6 +1145,36 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
         if (use_planar_prior_)
             pose_graph_->addPlanarPrior(planar_prior_sigmas_);
 
+        if (imu_preintegration_)
+        {
+            // Preintegrate the RAW samples over the keyframe interval (kept
+            // off the IMU hot path; ~200 samples at keyframe rate). Skip the
+            // factor when the buffer doesn't cover the interval (long outage
+            // vs. buffer history) — the lidar/wheel betweens still chain and
+            // the graph re-seeds V/B at the next covered keyframe.
+            // Keyframes are distance-gated, so a stationary pause stretches
+            // the interval arbitrarily; preintegrating tens of seconds gives
+            // a huge, poorly-linearized factor. Cap it — the chain re-seeds
+            // at the next covered keyframe.
+            const double interval = features_.stamp - previous_stamp;
+            const auto   samples  = imu_buffer_.samplesBetween(previous_stamp, features_.stamp);
+            const bool   covered  = samples.size() >= 2 && interval <= imu_preint_max_interval_ &&
+                                 samples.back().timestamp - previous_stamp > interval - 0.1;
+            if (covered)
+            {
+                pim_->resetIntegrationAndSetBias(pose_graph_->latestBias());
+                double prev_t = previous_stamp;
+                for (const ImuData& s : samples)
+                {
+                    const double dt = s.timestamp - prev_t;
+                    if (dt > 0.0)
+                        pim_->integrateMeasurement(s.linear_acceleration, s.angular_velocity, dt);
+                    prev_t = s.timestamp;
+                }
+                pose_graph_->addCombinedImuFactor(*pim_, planar_motion_);
+            }
+        }
+
         int  anchors             = 0;
         bool surveyed_this_round = false;
         if (use_markers_)
@@ -1162,6 +1249,40 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
         const bool corrected = result == PoseGraph::OptimizeResult::CORRECTED;
         if (surveyed_this_round)
             world_anchored_ = true;  // gauge fixed: free landmarks may enter
+
+        if (imu_preintegration_)
+        {
+            // NOTE: the graph's bias estimate is deliberately NOT fed back
+            // into the buffer (deskew/prediction). That closes a loop through
+            // the scan matcher — a transient bias mis-estimate corrupts
+            // deskew, which corrupts the match, which reinforces the
+            // mis-estimate (observed as non-repeatable yaw excursions). The
+            // buffer keeps the stationary-init bias; the graph's online
+            // estimate corrects the FACTORS and is published for monitoring.
+            const auto bias = pose_graph_->latestBias();
+
+            if (debug_imu_state_ && debug_bias_pub_->is_activated())
+            {
+                geometry_msgs::msg::AccelStamped bias_msg;
+                bias_msg.header.stamp = rclcpp::Time(static_cast<int64_t>(features_.stamp * 1e9));
+                bias_msg.header.frame_id = base_frame_;
+                bias_msg.accel.linear.x  = bias.accelerometer().x();
+                bias_msg.accel.linear.y  = bias.accelerometer().y();
+                bias_msg.accel.linear.z  = bias.accelerometer().z();
+                bias_msg.accel.angular.x = bias.gyroscope().x();
+                bias_msg.accel.angular.y = bias.gyroscope().y();
+                bias_msg.accel.angular.z = bias.gyroscope().z();
+                debug_bias_pub_->publish(bias_msg);
+
+                geometry_msgs::msg::Vector3Stamped vel_msg;
+                vel_msg.header      = bias_msg.header;
+                const auto velocity = pose_graph_->latestVelocity();
+                vel_msg.vector.x    = velocity.x();
+                vel_msg.vector.y    = velocity.y();
+                vel_msg.vector.z    = velocity.z();
+                debug_velocity_pub_->publish(vel_msg);
+            }
+        }
 
         const gtsam::Pose3 optimized = pose_graph_->latestPose();
         Cloud::Ptr         edge_copy(new Cloud(*features_.edge));

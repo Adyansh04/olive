@@ -8,6 +8,8 @@
 
 #include <gtsam/geometry/Point3.h>
 #include <gtsam/geometry/Pose3.h>
+#include <gtsam/navigation/CombinedImuFactor.h>
+#include <gtsam/navigation/ImuBias.h>
 #include <gtsam/nonlinear/ISAM2.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 
@@ -130,6 +132,37 @@ public:
     /// Committed landmark estimates (id -> optimized position), for debug viz
     std::vector<std::pair<int64_t, gtsam::Point3>> landmarks() const;
 
+    /**
+     * @brief Install IMU velocity/bias states + priors on the FIRST keyframe
+     *
+     * Call between addFirstKeyframe() and optimize() to enable tight IMU
+     * coupling: V(0) = 0 (stationary init) and B(0) seeded with the measured
+     * gyro bias.
+     */
+    void addImuPriors(
+        const gtsam::Vector3& gyro_bias_seed,
+        double                velocity_sigma,
+        double                accel_bias_sigma,
+        double                gyro_bias_sigma);
+
+    /**
+     * @brief Chain a CombinedImuFactor onto the newest keyframe
+     *
+     * Adds V(n-1)/B(n-1) states and the 6-key preintegration factor from the
+     * previous keyframe. If the chain was broken (a keyframe without IMU
+     * states, e.g. a wheel-paced dropout keyframe), the states are re-seeded
+     * with priors instead so the factor never references a missing key.
+     * @param pim           Preintegrated measurements over the interval
+     * @param planar_guard  Add a soft zero-z velocity prior (planar robots:
+     *                      guards the vz / accel-bias-z co-drift)
+     */
+    void
+        addCombinedImuFactor(const gtsam::PreintegratedCombinedMeasurements& pim, bool planar_guard);
+
+    /// Latest committed IMU state (rollback-safe: refreshed only on success)
+    gtsam::Vector3               latestVelocity() const { return last_velocity_; }
+    gtsam::imuBias::ConstantBias latestBias() const { return last_bias_; }
+
     /// Outcome of one incremental update round
     enum class OptimizeResult
     {
@@ -141,9 +174,14 @@ public:
     /**
      * @brief Run the incremental update; call once after adding factors
      *
-     * On FAILED the pending factors/values are discarded and the keyframe
-     * count rolls back to the last committed state, so the caller must skip
-     * the keyframe entirely (an indeterminate system must not kill the node).
+     * On FAILED the pending factors/values are discarded and all bookkeeping
+     * (keyframe count, landmark ids, IMU chain, committed velocity/bias)
+     * rolls back to the last committed state, so the caller must skip the
+     * keyframe entirely (an indeterminate system must not kill the node).
+     * Committed queries keep serving the last good state. Note: iSAM2 gives
+     * no strong exception guarantee — depending on where the update threw,
+     * later rounds may fail too; the node then degrades to scan-matching
+     * (published pose stays live), which is the intended failure mode.
      */
     OptimizeResult optimize();
 
@@ -181,6 +219,18 @@ private:
     std::set<int64_t>                   landmark_ids_;
     std::set<int64_t>                   pending_landmark_ids_;
     std::unordered_map<int64_t, size_t> landmark_last_seen_kf_;
+
+    // IMU tight-coupling state. imu_chain_tail_ = index of the last COMMITTED
+    // keyframe carrying V/B states (-1 = none); the pending variant commits or
+    // rolls back with optimize(), mirroring the keyframe count.
+    bool                         imu_enabled_            = false;
+    long                         imu_chain_tail_         = -1;
+    long                         pending_imu_chain_tail_ = -1;
+    double                       velocity_sigma_         = 0.1;
+    double                       accel_bias_sigma_       = 0.1;
+    double                       gyro_bias_sigma_        = 0.01;
+    gtsam::Vector3               last_velocity_{ 0.0, 0.0, 0.0 };
+    gtsam::imuBias::ConstantBias last_bias_;
 };
 
 }  // namespace olive
