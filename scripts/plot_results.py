@@ -71,7 +71,7 @@ def nearest(seq, t):
 reader, tmp = open_reader(BAG)
 try:
     types = {t.name: t.type for t in reader.get_all_topics_and_types()}
-    gt, fused, local, wheel, m2o, bias, vel = [], [], [], [], [], [], []
+    gt, fused, local, wheel, m2o, bias, vel, vo = [], [], [], [], [], [], [], []
     while reader.has_next():
         topic, data, _ = reader.read_next()
         if topic not in types:
@@ -97,11 +97,13 @@ try:
                          m.accel.angular.x, m.accel.angular.y, m.accel.angular.z))
         elif topic == "/olive/debug/velocity":
             vel.append((st(m.header), m.vector.x, m.vector.y, m.vector.z))
+        elif topic == "/olive/visual_odom":
+            vo.append((st(m.header), m.pose.pose.position.x, m.pose.pose.position.y))
 finally:
     if tmp:
         shutil.rmtree(tmp, ignore_errors=True)
 
-for s in (gt, fused, local, wheel, m2o, bias, vel):
+for s in (gt, fused, local, wheel, m2o, bias, vel, vo):
     s.sort()
 t0 = fused[0][0]
 
@@ -113,7 +115,11 @@ for (t, xf, yf) in fused:
         gi += 1
     err.append((t - t0, math.hypot(xf - gt[gi][1], yf - gt[gi][2])))
 anchor_t = next((t for t, e in err if e < 0.5), None)
-post = [(t, e) for t, e in err if anchor_t is not None and t >= anchor_t]
+if anchor_t is None:  # looser world (textured maze anchors to ~1 m, not cm)
+    anchor_t = next((t for t, e in err if e < 2.0), None)
+if anchor_t is None:  # never anchored at all — keep the whole run
+    anchor_t = 0.0
+post = [(t, e) for t, e in err if t >= anchor_t] or err
 rmse = math.sqrt(sum(e * e for _, e in post) / len(post))
 emax = max(e for _, e in post)
 
@@ -138,14 +144,18 @@ fig.savefig(os.path.join(OUT, "trajectory.png"))
 plt.close(fig)
 
 # ---------------------------------------------------------------- Fig 2: smooth local vs raw wheel (odom frame)
+# Both streams live in the odom frame, which accumulates from sim start; shift
+# each to its own run-start so the comparison is the RELATIVE drift over the run
+# (fair no matter how much either stream had already drifted before recording).
 fig, ax = plt.subplots(figsize=(6.4, 6.2))
-ax.plot([x for _, x, _ in wheel], [y for _, _, y in wheel], color=C_WHEEL, lw=1.6,
-        label="raw wheel  /odom  (dead-reckoning)")
-ax.plot([x for _, x, _ in local], [y for _, _, y in local], color=C_LOCAL, lw=1.6,
-        label="OLIVE local  /olive/odometry_local")
-# endpoints
-ax.scatter([wheel[-1][1]], [wheel[-1][2]], s=60, c=C_WHEEL, zorder=5, edgecolors="white")
-ax.scatter([local[-1][1]], [local[-1][2]], s=60, c=C_LOCAL, zorder=5, edgecolors="white")
+wx0, wy0 = wheel[0][1], wheel[0][2]
+lx0, ly0 = local[0][1], local[0][2]
+wxr = [x - wx0 for _, x, _ in wheel]; wyr = [y - wy0 for _, _, y in wheel]
+lxr = [x - lx0 for _, x, _ in local]; lyr = [y - ly0 for _, _, y in local]
+ax.plot(wxr, wyr, color=C_WHEEL, lw=1.6, label="raw wheel  /odom  (dead-reckoning)")
+ax.plot(lxr, lyr, color=C_LOCAL, lw=1.6, label="OLIVE local  /olive/odometry_local")
+ax.scatter([wxr[-1]], [wyr[-1]], s=60, c=C_WHEEL, zorder=5, edgecolors="white")
+ax.scatter([lxr[-1]], [lyr[-1]], s=60, c=C_LOCAL, zorder=5, edgecolors="white")
 ax.set_aspect("equal")
 ax.set_xlabel("x [m]")
 ax.set_ylabel("y [m]")
@@ -225,6 +235,38 @@ fig.tight_layout()
 fig.savefig(os.path.join(OUT, "imu_state.png"))
 plt.close(fig)
 
+# ---------------------------------------------------------------- Fig 6: monocular VO trajectory
+# VO (vo_odom frame), wheel (odom) and ground truth (map) each start at the same
+# physical pose but in different frames, so shift each to its own start point and
+# overlay the shapes. VO is wheel-scaled + planar -> expect the square shape to be
+# tracked with bounded drift (it is the weakest modality, not marker-anchored).
+vo_drift = None
+if vo:
+    def rel(series):
+        x0, y0 = series[0][1], series[0][2]
+        return [x - x0 for _, x, _ in series], [y - y0 for _, _, y in series]
+
+    fig, ax = plt.subplots(figsize=(6.4, 6.2))
+    gxr, gyr = rel(gt)
+    wxr, wyr = rel(wheel)
+    vxr, vyr = rel(vo)
+    ax.plot(gxr, gyr, color=C_GT, lw=2.6, alpha=0.8, label="ground truth")
+    ax.plot(wxr, wyr, color=C_WHEEL, lw=1.3, alpha=0.8, label="raw wheel  /odom")
+    ax.plot(vxr, vyr, color=C_MARK, lw=1.5, label="monocular VO  /olive/visual_odom")
+    ax.scatter([vxr[-1]], [vyr[-1]], s=60, c=C_MARK, zorder=5, edgecolors="white")
+    ax.set_aspect("equal")
+    ax.set_xlabel("x from start [m]")
+    ax.set_ylabel("y from start [m]")
+    # final drift of VO vs ground truth, both start-aligned
+    vo_drift = math.hypot(vxr[-1] - gxr[-1], vyr[-1] - gyr[-1])
+    ax.set_title("Monocular visual odometry vs ground truth (start-aligned)\n"
+                 f"{len(vo)} VO updates, wheel-scaled; final drift {vo_drift:.2f} m",
+                 fontsize=11)
+    ax.legend(loc="upper left", fontsize=9)
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUT, "vo_trajectory.png"))
+    plt.close(fig)
+
 # ---------------------------------------------------------------- summary
 print("=== RESULT SUMMARY ===")
 print(f"duration: {err[-1][0]:.0f} s   fused samples: {len(fused)}   local samples: {len(local)}")
@@ -235,4 +277,8 @@ print(f"raw wheel /odom endpoint (odom frame): ({wheel[-1][1]:+.1f}, {wheel[-1][
 print(f"local /odom endpoint (odom frame):     ({local[-1][1]:+.1f}, {local[-1][2]:+.1f}) m")
 gz = [b[6] for b in bias]
 print(f"gyro-bias-z range: [{min(gz):+.4f}, {max(gz):+.4f}] rad/s")
+if vo:
+    print(f"VO updates: {len(vo)}   start-aligned final drift vs GT: {vo_drift:.2f} m")
+else:
+    print("VO: no /olive/visual_odom in bag")
 print("wrote:", ", ".join(sorted(os.listdir(OUT))))
