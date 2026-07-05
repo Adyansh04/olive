@@ -93,33 +93,35 @@ private:
     void publishFiducialDebug(double stamp);
 
     // Configuration
-    std::string                            points_topic_;
-    std::string                            imu_topic_;
-    std::string                            odom_topic_;
-    std::string                            odom_frame_;
-    std::string                            base_frame_;
-    std::string                            map_frame_;
-    std::string                            wheel_odom_topic_;
-    bool                                   planar_motion_    = true;
-    bool                                   use_wheel_odom_   = true;
-    bool                                   use_planar_prior_ = true;
-    bool                                   publish_map_tf_   = true;
-    bool                                   publish_odom_tf_  = false;
-    std::string                            smooth_odom_topic_;
-    std::string                            odom_child_frame_;
-    gtsam::Pose3                           child_from_base_;
-    double                                 smooth_odom_rate_hz_ = 50.0;
-    bool                                   use_markers_         = true;
-    bool                                   use_vo_              = false;
-    std::string                            vo_topic_;
-    FactorSigmas                           vo_between_sigmas_{};
-    std::string                            marker_topic_;
-    gtsam::Pose3                           base_from_camera_;
-    double                                 marker_sigma_m_        = 0.10;
-    double                                 marker_stamp_window_   = 0.25;
-    bool                                   marker_landmark_mode_  = true;
-    double                                 marker_survey_sigma_m_ = 0.05;
-    bool                                   world_anchored_        = false;
+    std::string  points_topic_;
+    std::string  imu_topic_;
+    std::string  odom_topic_;
+    std::string  odom_frame_;
+    std::string  base_frame_;
+    std::string  map_frame_;
+    std::string  wheel_odom_topic_;
+    bool         planar_motion_    = true;
+    bool         use_wheel_odom_   = true;
+    bool         use_planar_prior_ = true;
+    bool         publish_map_tf_   = true;
+    bool         publish_odom_tf_  = false;
+    std::string  smooth_odom_topic_;
+    std::string  odom_child_frame_;
+    gtsam::Pose3 child_from_base_;
+    double       smooth_odom_rate_hz_ = 50.0;
+    bool         use_markers_         = true;
+    bool         use_vo_              = false;
+    std::string  vo_topic_;
+    FactorSigmas vo_between_sigmas_{};
+    std::size_t  vo_factors_added_   = 0;  ///< VO betweens that landed
+    std::size_t  vo_factors_skipped_ = 0;  ///< VO betweens dropped (coverage)
+    std::string  marker_topic_;
+    gtsam::Pose3 base_from_camera_;
+    double       marker_sigma_m_        = 0.10;
+    double       marker_stamp_window_   = 0.25;
+    bool         marker_landmark_mode_  = true;
+    double       marker_survey_sigma_m_ = 0.05;
+    bool         world_anchored_        = false;
     std::unordered_map<int, gtsam::Point3> known_markers_;
 
     // Debug toggles (live-updatable via `ros2 param set`)
