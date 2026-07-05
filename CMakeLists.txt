@@ -124,7 +124,9 @@ install(DIRECTORY
 install(PROGRAMS
   scripts/bringup_test.sh
   scripts/drive_test.py
+  scripts/square_drive.py
   scripts/ate_eval.py
+  scripts/analyze_bag.py
   scripts/marker_demo.py
   scripts/calibrate_marker_range.py
   scripts/imu_bias_relay.py
