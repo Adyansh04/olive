@@ -33,6 +33,19 @@ fusion_node:
     base_frame: base_link
     map_frame: map
 
+    # --- TF ownership -----------------------------------------------------
+    # publish_odom_tf: false keeps today's split (your base driver owns
+    # odom->base; this node broadcasts only map->odom). Flip to true AFTER
+    # disabling the base driver's odom->base TF so this node owns both edges
+    # and Nav2's controller can consume the fused smooth_odom_topic instead
+    # of raw wheel odom. Exactly ONE node may publish odom->base.
+    publish_odom_tf: false               # TODO: flip after removing driver TF
+    smooth_odom_topic: /olive/odometry_local
+    smooth_odom_rate_hz: 30.0
+    odom_child_frame: base_footprint     # TODO: match your URDF
+    odom_child_to_base_xyz: [0.0, 0.0, 0.0]  # TODO: URDF base joint origin
+                                         # (from TF when extrinsics_from_tf)
+
     # --- extrinsics -------------------------------------------------------
     # Prefer TF from your URDF; else fill the params.
     extrinsics_from_tf: true

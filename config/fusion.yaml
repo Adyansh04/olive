@@ -5,9 +5,11 @@
 #     front-end nodes to start. Any source can be switched off here.
 #   - Each node then loads its own `<node_name>: ros__parameters:` section.
 #
-# Frames follow REP-105: map -> odom -> base_link. The fusion backend owns
-# only the map->odom correction; the continuous odom->base_link transform
-# comes from the platform (DiffDrive in sim).
+# Frames follow REP-105: map -> odom -> base_footprint -> base_link. With
+# publish_odom_tf the fusion backend owns BOTH edges: the smooth, jump-free
+# odom->base_footprint (scan increments + wheel + gyro; what Nav2's controller
+# should consume) and the map->odom correction (marker anchors and loop
+# closures jump HERE, never in the odom frame).
 
 modalities:
   lio: true        # LiDAR-inertial core (fusion_node backbone)
@@ -29,9 +31,18 @@ fusion_node:
     map_frame: map
     wheel_odom_topic: /odom
 
-    # REP-105: broadcast only the map->odom correction (wheel odom owns
-    # odom->base). The fused pose is published in the map frame.
+    # REP-105 TF ownership. publish_map_tf: the map->odom correction.
+    # publish_odom_tf: this node ALSO owns the smooth odom->base_footprint
+    # edge (the sim DiffDrive TF is disabled to match); the jump-free local
+    # odometry is published on smooth_odom_topic for Nav2's controller.
     publish_map_tf: true
+    publish_odom_tf: true
+    smooth_odom_topic: /olive/odometry_local
+    smooth_odom_rate_hz: 50.0
+    odom_child_frame: base_footprint
+    # base_link in the base_footprint frame (mirrors the URDF base_joint);
+    # overridden from TF when extrinsics_from_tf is on.
+    odom_child_to_base_xyz: [0.0, 0.0, 0.06]
     use_planar_prior: true
 
     # Fixed base<-lidar extrinsic (from the URDF; TF-driven on real hardware later)
