@@ -181,7 +181,11 @@ fusion_node:
     # constrain relative motion — an odometry source. "anchor" restores the
     # legacy unary factor (surveyed ids only).
     marker_mode: landmark
-    marker_survey_sigma_m: 0.05        # world-prior sigma for surveyed ids
+    # World-prior sigma for surveyed ids. The sim survey is exact, so pin it
+    # tight (0.01 -> ATE 0.054 RMSE, beats the legacy anchor's 0.059); looser
+    # values let the landmark absorb detector bias, trading RMSE for a lower
+    # worst-case (0.02 -> RMSE 0.071 / max 0.110). Match YOUR survey accuracy.
+    marker_survey_sigma_m: 0.01
     marker_accept_unknown_ids: true    # decoded but unsurveyed -> free landmark
     marker_accept_undecoded_ids: true  # id bits failed -> tracking-id landmark
                                        # (circle-fit position is still good)
