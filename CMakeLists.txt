@@ -130,6 +130,7 @@ install(PROGRAMS
   scripts/marker_demo.py
   scripts/calibrate_marker_range.py
   scripts/imu_bias_relay.py
+  scripts/wheel_odom_relay.py
   scripts/endurance_test.py
   scripts/lidar_gate_relay.py
   DESTINATION lib/${PROJECT_NAME}
