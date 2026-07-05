@@ -73,7 +73,9 @@ case "$TEST" in
     BAG_PID=$!
     sleep 3
     ros2 run olive drive_test.py --long
-    kill -INT "$BAG_PID" 2>/dev/null
+    # SIGTERM, not SIGINT: background jobs in non-interactive shells have
+    # SIGINT ignored; rosbag2 finalizes metadata on SIGTERM just the same.
+    kill -TERM "$BAG_PID" 2>/dev/null
     wait "$BAG_PID" 2>/dev/null
     ros2 run olive analyze_bag.py "$BAG_DIR" --max-step 0.05 || exit 1
     ;;
