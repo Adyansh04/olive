@@ -116,9 +116,9 @@ std::vector<Eigen::Quaterniond> ImuBuffer::sampleRotations(double t0, double t1,
 
     std::lock_guard<std::mutex> lock(mutex_);
 
-    const double       dt       = (t1 - t0) / n;
-    Eigen::Quaterniond rotation = Eigen::Quaterniond::Identity();
-    double             cursor   = t0;
+    const double       dt        = (t1 - t0) / n;
+    Eigen::Quaterniond rotation  = Eigen::Quaterniond::Identity();
+    double             cursor    = t0;
     Eigen::Vector3d    last_rate = Eigen::Vector3d::Zero();
     auto               it        = samples_.begin();
 
@@ -174,6 +174,23 @@ ImuBuffer::WindowStats ImuBuffer::windowStats(double t0, double t1) const
             std::max(stats.accel_deviation, (sample.linear_acceleration - stats.accel_mean).norm());
     }
     return stats;
+}
+
+std::vector<ImuData> ImuBuffer::samplesBetween(double t0, double t1) const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::vector<ImuData> result;
+    result.reserve(static_cast<size_t>(std::max(0.0, (t1 - t0) * 250.0)));
+    for (const ImuData& sample : samples_)
+    {
+        if (sample.timestamp <= t0)
+            continue;
+        if (sample.timestamp > t1)
+            break;  // samples are time-ordered
+        result.push_back(sample);
+    }
+    return result;
 }
 
 bool ImuBuffer::hasData() const

@@ -15,7 +15,9 @@ namespace olive
 namespace
 {
 
+using gtsam::symbol_shorthand::B;
 using gtsam::symbol_shorthand::L;
+using gtsam::symbol_shorthand::V;
 using gtsam::symbol_shorthand::X;
 
 /// A free landmark re-observed after this many keyframes acts like a loop
@@ -195,6 +197,86 @@ void PoseGraph::addMarkerObservation(
     landmark_last_seen_kf_[landmark_id] = current_kf;
 }
 
+void PoseGraph::addImuPriors(
+    const gtsam::Vector3& gyro_bias_seed,
+    double                velocity_sigma,
+    double                accel_bias_sigma,
+    double                gyro_bias_sigma)
+{
+    imu_enabled_      = true;
+    velocity_sigma_   = velocity_sigma;
+    accel_bias_sigma_ = accel_bias_sigma;
+    gyro_bias_sigma_  = gyro_bias_sigma;
+
+    // Stationary start: zero velocity, measured gyro bias, zero accel bias.
+    last_velocity_ = gtsam::Vector3::Zero();
+    last_bias_     = gtsam::imuBias::ConstantBias(gtsam::Vector3::Zero(), gyro_bias_seed);
+
+    pending_values_.insert(V(0), last_velocity_);
+    pending_values_.insert(B(0), last_bias_);
+    pending_factors_.add(gtsam::PriorFactor<gtsam::Vector3>(
+        V(0),
+        last_velocity_,
+        gtsam::noiseModel::Isotropic::Sigma(3, velocity_sigma_)));
+    gtsam::Vector6 bias_sigmas;
+    bias_sigmas << accel_bias_sigma_, accel_bias_sigma_, accel_bias_sigma_, gyro_bias_sigma_,
+        gyro_bias_sigma_, gyro_bias_sigma_;
+    pending_factors_.add(gtsam::PriorFactor<gtsam::imuBias::ConstantBias>(
+        B(0),
+        last_bias_,
+        gtsam::noiseModel::Diagonal::Sigmas(bias_sigmas)));
+    pending_imu_chain_tail_ = 0;
+}
+
+void PoseGraph::addCombinedImuFactor(
+    const gtsam::PreintegratedCombinedMeasurements& pim,
+    bool                                            planar_guard)
+{
+    const size_t n = num_keyframes_ - 1;
+
+    // Initial estimates: velocity carried forward (the factor corrects it),
+    // bias carried forward (its random walk is inside the combined factor).
+    pending_values_.insert(V(n), last_velocity_);
+    pending_values_.insert(B(n), last_bias_);
+
+    const long chained_from =
+        pending_imu_chain_tail_ >= 0 ? pending_imu_chain_tail_ : imu_chain_tail_;
+    if (chained_from == static_cast<long>(n) - 1)
+    {
+        pending_factors_.add(
+            gtsam::CombinedImuFactor(X(n - 1), V(n - 1), X(n), V(n), B(n - 1), B(n), pim));
+    }
+    else
+    {
+        // Chain broken (a keyframe without IMU states, e.g. wheel-paced
+        // dropout keyframe): re-seed with priors so the factor never
+        // references a missing key.
+        pending_factors_.add(gtsam::PriorFactor<gtsam::Vector3>(
+            V(n),
+            last_velocity_,
+            gtsam::noiseModel::Isotropic::Sigma(3, velocity_sigma_)));
+        gtsam::Vector6 bias_sigmas;
+        bias_sigmas << accel_bias_sigma_, accel_bias_sigma_, accel_bias_sigma_, gyro_bias_sigma_,
+            gyro_bias_sigma_, gyro_bias_sigma_;
+        pending_factors_.add(gtsam::PriorFactor<gtsam::imuBias::ConstantBias>(
+            B(n),
+            last_bias_,
+            gtsam::noiseModel::Diagonal::Sigmas(bias_sigmas)));
+    }
+
+    if (planar_guard)
+    {
+        // z-only velocity pin: guards the slow vz / accel-bias-z co-drift a
+        // planar pose prior alone cannot observe. x/y stay unconstrained.
+        pending_factors_.add(gtsam::PriorFactor<gtsam::Vector3>(
+            V(n),
+            gtsam::Vector3::Zero(),
+            gtsam::noiseModel::Diagonal::Sigmas(gtsam::Vector3(5.0, 5.0, 0.05))));
+    }
+
+    pending_imu_chain_tail_ = static_cast<long>(n);
+}
+
 PoseGraph::OptimizeResult PoseGraph::optimize()
 {
     const bool corrected = has_global_factor_;
@@ -219,7 +301,8 @@ PoseGraph::OptimizeResult PoseGraph::optimize()
         pending_factors_.resize(0);
         pending_values_.clear();
         pending_landmark_ids_.clear();
-        num_keyframes_ = committed_keyframes_;
+        pending_imu_chain_tail_ = -1;
+        num_keyframes_          = committed_keyframes_;
         return OptimizeResult::FAILED;
     }
 
@@ -228,6 +311,18 @@ PoseGraph::OptimizeResult PoseGraph::optimize()
     landmark_ids_.merge(pending_landmark_ids_);
     pending_landmark_ids_.clear();
     committed_keyframes_ = num_keyframes_;
+    if (pending_imu_chain_tail_ >= 0)
+        imu_chain_tail_ = pending_imu_chain_tail_;
+    pending_imu_chain_tail_ = -1;
+
+    // Committed IMU state (rollback-safe: only refreshed here on success).
+    if (imu_enabled_ && imu_chain_tail_ >= 0)
+    {
+        last_velocity_ =
+            isam_.calculateEstimate<gtsam::Vector3>(V(static_cast<uint64_t>(imu_chain_tail_)));
+        last_bias_ = isam_.calculateEstimate<gtsam::imuBias::ConstantBias>(
+            B(static_cast<uint64_t>(imu_chain_tail_)));
+    }
 
     // The full estimate is only needed when past poses moved; the common
     // path stays incremental (see pose() staleness contract).

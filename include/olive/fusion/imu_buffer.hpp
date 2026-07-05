@@ -77,6 +77,14 @@ public:
     };
     WindowStats windowStats(double t0, double t1) const;
 
+    /**
+     * @brief Raw samples with t0 < timestamp <= t1 (base axes, bias NOT
+     *        subtracted) — the input a bias-estimating preintegrator needs.
+     *
+     * Single lock, copies out. Called at keyframe rate, never per scan.
+     */
+    std::vector<ImuData> samplesBetween(double t0, double t1) const;
+
     /// True once at least one sample is buffered
     bool hasData() const;
 
