@@ -2,6 +2,15 @@
 
 **O**ptimization of **L**idar, **I**nertial, **V**ision & **E**ncoders — graph-based multi-modal sensor fusion for a planar ground robot. ROS 2 **Jazzy**, C++17, [GTSAM](https://github.com/borglab/gtsam) factor-graph backend.
 
+One iSAM2 keyframe graph fuses LiDAR, IMU (tightly coupled), wheel encoders and WhyCode fiducials, with ICP loop closure. It produces both a globally-accurate map-frame pose and a smooth, jump-free odom-frame stream — a drop-in localization backend for Nav2.
+
+<p align="center">
+<img src="media/trajectory.png" width="49%" alt="Fused trajectory vs ground truth over 3 maze loops (3.6 cm RMSE)">
+<img src="media/local_vs_wheel.png" width="49%" alt="Smooth local odometry stays tight while raw wheel odometry drifts">
+</p>
+
+*Left: the fused estimate tracks ground truth to a few cm over three 56 m loops. Right: in the continuous odom frame, OLIVE's fused local odometry (green) stays a tight, repeatable square while raw wheel dead-reckoning (red) drifts 17 m — the "smoother, more accurate odometry" a controller consumes.*
+
 ## Architecture
 
 One incremental (iSAM2) keyframe pose graph fuses every modality; each source is a runtime toggle in `config/fusion.yaml`:
@@ -105,12 +114,66 @@ colcon test --packages-select olive   # covariance conventions, scan matcher on
                                       # (analytic vs numerical Jacobians, drift recovery)
 ```
 
-## Results (Gazebo Harmonic, maze world, headless)
+## Results
 
-- LiDAR-inertial core: 10 Hz, 6–12 ms/scan; 35 s multi-turn run **1.1 cm / 0.13°** endpoint error vs ground truth, ~1 mm stationary jitter.
-- Full stack (landmarks + tight IMU coupling + wheel + loop closure): drive test **1.4 cm / 0.22°**; full-trajectory ATE after anchoring **0.056 m RMSE** (repeatable).
-- Smooth-odometry split: across the 8.49 m first-anchor snap the `map→odom` correction jumps 8.5 m while `/olive/odometry_local`'s largest step stays **3–4 cm** — global corrections never reach the odom frame.
-- Marker landmarks: unsurveyed markers converge to **6–8 cm** of their true positions from sightings alone; during a 25 s LiDAR blackout, marker observations pull the coasted trajectory back to **1.1 cm** final error (markers off: 4.9 m, never recovers).
-- IMU tight coupling: a 0.02 rad/s gyro-bias step injected mid-run is estimated online to **0.0197 rad/s within ~25 s** and tracked thereafter (`/olive/debug/bias`).
-- Loop closure: under artificially induced drift (crippled matcher, no wheel factors), an out-and-back route improves from 4.44 m to **0.39 m** final error (11×).
-- LiDAR outage (fault-injected): output and TF continue on wheel coasting with `/diagnostics` reporting, cross-track and yaw re-lock on recovery; 10-minute endurance drive with bounded cloud storage ends 1–2 cm from ground truth.
+Gazebo Harmonic, maze world (16×16 m), 3 loops of a 56 m square. Figures are
+generated from a recorded bag by [`scripts/plot_results.py`](scripts/plot_results.py).
+
+| Metric | Value |
+|--------|-------|
+| Absolute trajectory error (post-anchor, vs ground truth) | **3.6 cm RMSE**, 9.0 cm max |
+| Drive-test relative accuracy (35 s multi-turn) | **1.4 cm / 0.22°** |
+| First-anchor drift reset (spawn frame → world) | 8.5 m → few cm, one sighting |
+| Local-odometry drift, 3 loops (168 m) | **0.9 m** (raw wheel odometry: 17 m) |
+| Local-stream max step across the 8.5 m anchor snap | **4.3 cm** (corrections stay in `map→odom`) |
+| Unsurveyed-marker landmark convergence | **6–8 cm** from sightings alone |
+| LiDAR-core throughput | 10 Hz, 6–12 ms/scan |
+
+### Accuracy over the run — drift-free after the first anchor
+
+![Absolute position error over time](media/error_time.png)
+
+The map frame starts spawn-relative (8.5 m offset); the first fiducial sighting
+snaps the whole trajectory into the surveyed world frame, after which error
+stays bounded — dipping to millimetres at each corner marker and never
+accumulating across the three loops.
+
+### The REP-105 split — smooth local odometry for Nav2
+
+![map→odom absorbs the jumps, the local stream never does](media/continuity.png)
+
+OLIVE publishes two odometry outputs: `/olive/odometry` (map frame,
+globally accurate, **allowed** to jump) and `/olive/odometry_local` (odom
+frame, ~50 Hz, **continuous**). Every global correction — the 8.5 m anchor
+snap, every loop closure — lands in the `map→odom` transform; the local stream
+a controller consumes never steps more than a few cm. That is what makes it a
+drop-in AMCL replacement for Nav2.
+
+### Tight IMU coupling — online bias & velocity
+
+![Online IMU bias and velocity estimated by the graph](media/imu_state.png)
+
+Velocity and gyro/accel bias are states in the graph, chained by preintegrated
+`CombinedImuFactor`s. The estimated velocity tracks the square drive; the gyro
+bias stays bounded near zero (the sim IMU has negligible true bias). In a
+fault-injection test, a 0.02 rad/s bias stepped on mid-run — invisible to the
+stationary startup estimate — is recovered online to **0.0197 rad/s within
+~25 s**, something a loosely-coupled filter cannot do.
+
+### Robustness (fault injection)
+
+- **Marker odometry / LiDAR blackout**: during a 25 s LiDAR outage, marker
+  observations pull the coasted trajectory back to **1.1 cm** final error;
+  with markers off the same outage drifts 4.9 m and never recovers.
+- **Corrupted wheel odometry** (`scripts/wheel_odom_relay.py`, ~13 m injected
+  drift): the fused output is unchanged — LiDAR + markers carry the estimate.
+- **Loop closure** (crippled matcher, no wheel factors): an out-and-back route
+  improves from 4.44 m to **0.39 m** final error (11×).
+- **Endurance**: a 10-minute continuous drive with bounded cloud storage ends
+  1–2 cm from ground truth, with per-sensor `/diagnostics` health throughout.
+
+Reproduce: record with [`scripts/square_drive.py`](scripts/square_drive.py) +
+`ros2 bag record`, analyse offline with
+[`scripts/analyze_bag.py`](scripts/analyze_bag.py), and regenerate these
+figures with `scripts/plot_results.py`. A full replay walkthrough is in
+`demo/REPLAY_GUIDE.md`.
