@@ -65,6 +65,8 @@ private:
     double      min_parallax_px_  = 12.0;
     double      ransac_threshold_ = 1.0;
     double      min_wheel_motion_ = 0.03;
+    double      max_keyframe_age_ = 2.0;  ///< re-adopt keyframe past this age (< wheel history)
+    bool        debug_ = false;  ///< log per-frame gate values (why VO is/ isn't publishing)
 
     // Camera intrinsics (from camera_info)
     bool        have_intrinsics_ = false;
