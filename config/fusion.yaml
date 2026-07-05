@@ -54,6 +54,21 @@ fusion_node:
     # IMU startup initialization: the robot should be stationary for this
     # window so the gyro bias can be estimated; scans are held until then.
     # On timeout the node proceeds with zero bias (and warns).
+    # IMU tight coupling: velocity + bias states in the graph, chained by
+    # preintegrated CombinedImuFactors. The graph then estimates the gyro and
+    # accel bias ONLINE (fed back to deskew/prediction); the stationary init
+    # only seeds it. Noise sigmas follow the sim IMU spec (gyro 2e-4 rad/s,
+    # accel 1.7e-2 m/s^2 per sample @100 Hz -> continuous 2e-5 / 1.7e-3) with
+    # ~5x margin for model error.
+    imu_preintegration: true
+    accel_noise_sigma: 0.01        # m/s^2/sqrt(Hz)
+    gyro_noise_sigma: 1.0e-4       # rad/s/sqrt(Hz)
+    accel_bias_rw_sigma: 1.0e-3    # bias random walk (adaptation speed)
+    gyro_bias_rw_sigma: 5.0e-4
+    integration_sigma: 1.0e-4
+    bias_acc_omega_int: 1.0e-4
+    debug_imu_state: true          # /olive/debug/bias + /olive/debug/velocity
+
     imu_init_duration_s: 1.5
     imu_init_max_wait_s: 10.0
     stationary_gyro_thresh_rad_s: 0.02

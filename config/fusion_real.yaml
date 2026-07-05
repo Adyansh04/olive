@@ -68,6 +68,21 @@ fusion_node:
     stationary_gyro_thresh_rad_s: 0.03   # raise for noisier gyros
     stationary_wheel_thresh_m: 0.005
     gyro_bias_reestimate: true           # tracks temperature drift
+                                         # (ignored once imu_preintegration
+                                         # is on - the graph tracks bias)
+
+    # --- IMU tight coupling -----------------------------------------------
+    # Enable AFTER calibrating the noise sigmas from your IMU datasheet (or
+    # an Allan-variance run): with wrong sigmas the IMU factor either fights
+    # the lidar or gets ignored. Sim-verified feature; one flag to enable.
+    imu_preintegration: false            # TODO: calibrate sigmas, then enable
+    accel_noise_sigma: 0.05              # TODO: datasheet, m/s^2/sqrt(Hz)
+    gyro_noise_sigma: 0.005              # TODO: datasheet, rad/s/sqrt(Hz)
+    accel_bias_rw_sigma: 1.0e-3          # TODO: bias instability
+    gyro_bias_rw_sigma: 1.0e-4           # TODO
+    integration_sigma: 1.0e-4
+    bias_acc_omega_int: 1.0e-4
+    debug_imu_state: true                # plot /olive/debug/bias to verify
 
     # --- time sync --------------------------------------------------------
     # Read the startup latency log lines, then compensate here.
