@@ -18,19 +18,21 @@
 #include <memory>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
+#include <optional>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include <rclcpp_lifecycle/lifecycle_publisher.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <unordered_map>
+#include <vector>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <whycode_vision/msg/why_code_pose_array.hpp>
 
 #include "olive/fusion/feature_extractor.hpp"
 #include "olive/fusion/fusion_types.hpp"
+#include "olive/fusion/health_monitor.hpp"
 #include "olive/fusion/imu_buffer.hpp"
 #include "olive/fusion/keyframe_map.hpp"
-#include "olive/fusion/health_monitor.hpp"
 #include "olive/fusion/loop_detector.hpp"
 #include "olive/fusion/marker_gate.hpp"
 #include "olive/fusion/pose_graph.hpp"
@@ -68,11 +70,15 @@ private:
     gtsam::Pose3 predictPose(double scan_stamp) const;
     void         publishOdometry(const gtsam::Pose3& pose, double stamp);
 
+    // Smooth odometry (odom frame): jump-free stream + odom->base TF
+    void updateMapOdomCorrection();
+    void publishSmoothOdometry(const gtsam::Pose3& odom_from_child, double stamp);
+
     // IMU startup initialization (gyro bias + sanity checks; gates scans)
     void handleImuInit(double stamp);
     void loadExtrinsicsFromTf();
     void publishDiagnostics();
-    void coastTick();
+    void odomTick();
     void attemptLoopClosure(double stamp);
     void refreshAfterCorrection();
     void logSensorLatency(const char* sensor, double stamp);
@@ -96,8 +102,13 @@ private:
     bool                                   use_wheel_odom_   = true;
     bool                                   use_planar_prior_ = true;
     bool                                   publish_map_tf_   = true;
-    bool                                   use_markers_      = true;
-    bool                                   use_vo_           = false;
+    bool                                   publish_odom_tf_  = false;
+    std::string                            smooth_odom_topic_;
+    std::string                            odom_child_frame_;
+    gtsam::Pose3                           child_from_base_;
+    double                                 smooth_odom_rate_hz_ = 50.0;
+    bool                                   use_markers_         = true;
+    bool                                   use_vo_              = false;
     std::string                            vo_topic_;
     FactorSigmas                           vo_between_sigmas_{};
     std::string                            marker_topic_;
@@ -141,18 +152,26 @@ private:
     gtsam::Pose3 last_increment_;
     double       last_scan_stamp_ = -1.0;
 
+    // Smooth odometry state: odom->base_footprint, advanced ONLY by
+    // correction-independent body increments (never by graph corrections).
+    gtsam::Pose3                smooth_pose_;
+    std::optional<gtsam::Pose3> wheel_origin_;   ///< first wheel sample (odom anchor)
+    gtsam::Pose3                map_from_odom_;  ///< cached correction (jumps live here)
+    bool                        map_odom_valid_ = false;
+    geometry_msgs::msg::Twist   last_wheel_twist_;
+
     // IMU initialization state
-    bool   imu_init_done_          = false;
-    double imu_init_window_start_  = -1.0;
-    double imu_init_first_stamp_   = -1.0;
-    double first_scan_stamp_       = -1.0;
-    double imu_init_duration_s_    = 1.5;
-    double imu_init_max_wait_s_    = 10.0;
-    double stationary_gyro_thresh_ = 0.02;
+    bool   imu_init_done_           = false;
+    double imu_init_window_start_   = -1.0;
+    double imu_init_first_stamp_    = -1.0;
+    double first_scan_stamp_        = -1.0;
+    double imu_init_duration_s_     = 1.5;
+    double imu_init_max_wait_s_     = 10.0;
+    double stationary_gyro_thresh_  = 0.02;
     double stationary_wheel_thresh_ = 0.005;
-    bool   gyro_bias_reestimate_   = false;
-    bool   deskew_enabled_         = true;
-    int    deskew_time_bins_       = 32;
+    bool   gyro_bias_reestimate_    = false;
+    bool   deskew_enabled_          = true;
+    int    deskew_time_bins_        = 32;
 
     // Cross-sensor time offsets (lidar is the reference; corrected = msg + offset)
     double imu_time_offset_    = 0.0;
@@ -174,6 +193,7 @@ private:
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr                 vo_sub_;
     std::unique_ptr<tf2_ros::TransformBroadcaster>                           tf_broadcaster_;
     rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
+    rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Odometry>::SharedPtr smooth_odom_pub_;
     rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>::SharedPtr     debug_path_pub_;
     rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PoseArray>::SharedPtr
         debug_keyframes_pub_;
@@ -186,12 +206,14 @@ private:
     rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::PointCloud2>::SharedPtr
         debug_scan_planars_pub_;
     rclcpp_lifecycle::LifecyclePublisher<visualization_msgs::msg::MarkerArray>::SharedPtr
-                                 debug_fiducials_pub_;
-    nav_msgs::msg::Odometry      odom_msg_;
-    rclcpp::TimerBase::SharedPtr autostart_timer_;
-    rclcpp::TimerBase::SharedPtr bias_reestimate_timer_;
-    rclcpp::TimerBase::SharedPtr diagnostics_timer_;
-    rclcpp::TimerBase::SharedPtr coast_timer_;
+                                                      debug_fiducials_pub_;
+    nav_msgs::msg::Odometry                           odom_msg_;
+    nav_msgs::msg::Odometry                           smooth_odom_msg_;
+    std::vector<geometry_msgs::msg::TransformStamped> tf_batch_;  ///< reused broadcast buffer
+    rclcpp::TimerBase::SharedPtr                      autostart_timer_;
+    rclcpp::TimerBase::SharedPtr                      bias_reestimate_timer_;
+    rclcpp::TimerBase::SharedPtr                      diagnostics_timer_;
+    rclcpp::TimerBase::SharedPtr                      odom_timer_;
     rclcpp_lifecycle::LifecyclePublisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr
         diagnostics_pub_;
 
@@ -213,10 +235,10 @@ private:
 
     // Loop closure
     std::unique_ptr<LoopDetector> loop_detector_;
-    bool   loop_closure_enabled_ = true;
-    double loop_min_interval_s_  = 5.0;
-    double loop_sigma_floor_     = 0.05;
-    double last_loop_attempt_    = -1.0;
+    bool                          loop_closure_enabled_ = true;
+    double                        loop_min_interval_s_  = 5.0;
+    double                        loop_sigma_floor_     = 0.05;
+    double                        last_loop_attempt_    = -1.0;
 
     // Debug state
     nav_msgs::msg::Path             debug_path_msg_;
