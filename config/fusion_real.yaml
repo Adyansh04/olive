@@ -167,6 +167,10 @@ fusion_node:
     lidar_between_sigmas: [0.01, 0.01, 0.01, 0.001, 0.001, 0.001]
     wheel_between_sigmas: [0.03, 0.03, 0.5, 0.5, 0.5, 0.2]
     planar_prior_sigmas: [0.02, 0.009, 0.009]
+    # Visual odometry (only used if the vo modality is enabled above). VO is
+    # sparse, so the buffer bracket is wider than the wheel slack.
+    vo_between_sigmas: [0.1, 0.1, 1.0, 1.0, 1.0, 0.1]
+    vo_buffer_slack_s: 0.25
 
     # --- debug (disable for deployment) ------------------------------------
     publish_debug: false
@@ -188,4 +192,6 @@ vo_node:
     min_tracked_features: 40             # feature-rich real scenes allow more
     min_parallax_px: 5.0
     ransac_threshold_px: 1.0
-    min_wheel_motion_m: 0.03
+    min_wheel_motion_m: 0.03             # lower if VO stays in the rotation-only branch
+    max_keyframe_age_s: 2.0              # force keyframe re-adopt (< wheel buffer) so VO never wedges
+    debug: false                         # set true to log per-frame gate values

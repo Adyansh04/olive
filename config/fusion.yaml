@@ -15,7 +15,7 @@ modalities:
   lio: true        # LiDAR-inertial core (fusion_node backbone)
   wheel: true      # wheel-odometry factors from /odom        (fusion_node input)
   markers: true    # WhyCode fiducial position anchors        (marker_node)
-  vo: false        # monocular visual odometry                (vo_node)
+  vo: true         # monocular visual odometry                (vo_node)
 
 fusion_node:
   ros__parameters:
@@ -242,7 +242,14 @@ fusion_node:
 
     # Visual odometry input (used only when the vo modality is enabled)
     vo_topic: /olive/visual_odom
-    vo_between_sigmas: [0.1, 0.1, 1.0, 1.0, 1.0, 0.1]
+    # VO is the weakest modality: monocular + wheel-scaled, it accumulates heading
+    # drift. Keep these LOOSE so VO never fights the LiDAR/marker corrections (tight
+    # x/y here corrupts the world-frame anchor); it is a redundant motion hint that
+    # earns its keep during LiDAR dropout, not a primary constraint.
+    vo_between_sigmas: [0.5, 0.5, 1.0, 1.0, 1.0, 0.5]
+    # VO publishes sparsely (parallax-gated) -> wider bracket than wheels so the
+    # VO between-factor actually lands at each keyframe pair.
+    vo_buffer_slack_s: 0.25
 
     # Noise sigmas, ROS order [x, y, z, roll, pitch, yaw] (m / rad).
     # Scan-match confidence is not well calibrated -> hand-tuned here.
@@ -266,4 +273,9 @@ vo_node:
     min_tracked_features: 15
     min_parallax_px: 5.0
     ransac_threshold_px: 1.0
-    min_wheel_motion_m: 0.03
+    # keyframe-to-keyframe KLT tracking has a ~1 s lifetime under forward motion,
+    # so publish translation at the small baseline reached while tracking is still
+    # healthy (below this the essential matrix is skipped as in-place rotation).
+    min_wheel_motion_m: 0.015
+    max_keyframe_age_s: 2.0   # force keyframe re-adopt (< wheel buffer) so a stall never wedges VO
+    debug: false          # set true to log per-frame gate values (why VO is/ isn't publishing)
