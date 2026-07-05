@@ -775,7 +775,11 @@ void FusionNode::wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
                          1e-9 * msg->header.stamp.nanosec + wheel_time_offset_;
     logSensorLatency("wheel", stamp);
     health_monitor_.beat("wheel", stamp);
-    wheel_buffer_.push(stamp, gtsam_conversions::toGtsamPose(msg->pose.pose));
+    const gtsam::Pose3 wheel_pose = gtsam_conversions::toGtsamPose(msg->pose.pose);
+    wheel_buffer_.push(stamp, wheel_pose);
+    if (!wheel_origin_)
+        wheel_origin_ = wheel_pose;  // anchors the smooth odom frame at node start
+    last_wheel_twist_ = msg->twist.twist;
 }
 
 void FusionNode::markerCallback(const whycode_vision::msg::WhyCodePoseArray::SharedPtr msg)
@@ -813,6 +817,17 @@ void FusionNode::bootstrapFirstKeyframe(const FeatureClouds& features)
 
     last_scan_pose_  = origin;
     last_scan_stamp_ = features.stamp;
+
+    // Seed the smooth stream with the motion accumulated since node start so
+    // the odom frame stays anchored where the first wheel sample was taken.
+    smooth_pose_ = gtsam::Pose3();
+    if (wheel_origin_)
+    {
+        const auto wheel_now = wheel_buffer_.poseAt(features.stamp);
+        if (wheel_now)
+            smooth_pose_ = wheel_origin_->between(*wheel_now);
+    }
+    updateMapOdomCorrection();
 }
 
 gtsam::Pose3 FusionNode::predictPose(double scan_stamp) const
@@ -910,6 +925,7 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
     {
         bootstrapFirstKeyframe(features_);
         publishOdometry(last_scan_pose_, features_.stamp);
+        publishSmoothOdometry(smooth_pose_, features_.stamp);
         return;
     }
 
@@ -955,7 +971,21 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
             "Scan matching failed; coasting on prediction");
     }
 
-    last_increment_  = last_scan_pose_.between(scan_pose);
+    last_increment_ = last_scan_pose_.between(scan_pose);
+
+    // Advance the smooth odom-frame pose by the correction-independent
+    // body increment. After a long LiDAR gap the scan increment carries the
+    // accumulated scan-vs-wheel correction of the whole outage — that
+    // correction belongs in map->odom, so the wheel increment is used there.
+    gtsam::Pose3 smooth_increment = last_increment_;
+    if (last_scan_stamp_ > 0.0 && features_.stamp - last_scan_stamp_ > prediction_gap_fallback_s_)
+    {
+        const auto wheel_gap = wheel_buffer_.relativePose(last_scan_stamp_, features_.stamp);
+        if (wheel_gap)
+            smooth_increment = *wheel_gap;
+    }
+    smooth_pose_ = smooth_pose_ * smooth_increment;
+
     last_scan_pose_  = scan_pose;
     last_scan_stamp_ = features_.stamp;
 
@@ -1075,7 +1105,9 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
                 *get_clock(),
                 5000,
                 "Graph update failed - keyframe discarded, coasting on scan matching");
+            updateMapOdomCorrection();
             publishOdometry(last_scan_pose_, features_.stamp);
+            publishSmoothOdometry(smooth_pose_, features_.stamp);
             publishScanDebug(features_.stamp);
             return;
         }
@@ -1108,7 +1140,12 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
             attemptLoopClosure(features_.stamp);
     }
 
+    // The correction is re-derived at the scan stamp where the fused pose and
+    // the smooth pose describe the same instant; any anchor/loop jump from
+    // this cycle lands here (map->odom) and never in the smooth stream.
+    updateMapOdomCorrection();
     publishOdometry(last_scan_pose_, features_.stamp);
+    publishSmoothOdometry(smooth_pose_, features_.stamp);
     publishScanDebug(features_.stamp);
 
     const double pipeline_ms =
@@ -1226,18 +1263,47 @@ void FusionNode::publishDiagnostics()
     diagnostics_pub_->publish(array);
 }
 
-void FusionNode::coastTick()
+void FusionNode::odomTick()
 {
-    // Keep the output and TF alive on wheel dead-reckoning while the LiDAR
-    // is silent; the graph itself is left untouched (tier-1 coasting).
-    if (last_scan_stamp_ < 0.0 || !wheel_buffer_.hasData())
+    // Before the first scan: wheel passthrough keeps the odom TF and local
+    // odometry alive during IMU init (Nav2 can look up odom->base right away).
+    if (last_scan_stamp_ < 0.0)
+    {
+        if (publish_odom_tf_ && wheel_origin_ && wheel_buffer_.hasData())
+        {
+            const double wheel_now = wheel_buffer_.latestStamp();
+            const auto   latest    = wheel_buffer_.poseAt(wheel_now);
+            if (latest)
+                publishSmoothOdometry(wheel_origin_->between(*latest), wheel_now);
+        }
+        return;
+    }
+
+    if (!wheel_buffer_.hasData())
         return;
     const double wheel_now = wheel_buffer_.latestStamp();
-    if (wheel_now - last_scan_stamp_ < lidar_dropout_timeout_)
+    if (wheel_now <= last_scan_stamp_)
         return;
 
     const auto wheel_relative = wheel_buffer_.relativePose(last_scan_stamp_, wheel_now);
     if (!wheel_relative)
+        return;
+
+    // Transient extension of the smooth pose between scans: wheel translation
+    // with gyro rotation (the predictPose recipe). State is not mutated — the
+    // next scan increment supersedes this extension.
+    gtsam::Pose3 extension = *wheel_relative;
+    if (imu_buffer_.hasData())
+        extension = gtsam::Pose3(
+            gtsam::Rot3(imu_buffer_.relativeRotation(last_scan_stamp_, wheel_now)),
+            extension.translation());
+    const gtsam::Pose3 smooth_now = smooth_pose_ * extension;
+    if (publish_odom_tf_)
+        publishSmoothOdometry(smooth_now, wheel_now);
+
+    // LiDAR dropout: keep the map-frame output alive on wheel dead-reckoning
+    // while the LiDAR is silent (tier-1); the graph itself is left untouched.
+    if (!coast_on_dropout_ || wheel_now - last_scan_stamp_ < lidar_dropout_timeout_)
         return;
 
     RCLCPP_WARN_THROTTLE(
@@ -1246,7 +1312,11 @@ void FusionNode::coastTick()
         5000,
         "No LiDAR for %.1f s - coasting on wheel odometry",
         wheel_now - last_scan_stamp_);
-    const gtsam::Pose3 coast_pose = last_scan_pose_ * (*wheel_relative);
+    // In odom-owning mode the coast pose follows the TF chain exactly (the
+    // correction stays frozen: no new global information during an outage).
+    const gtsam::Pose3 coast_pose = publish_odom_tf_ && map_odom_valid_ ?
+                                        map_from_odom_ * smooth_now * child_from_base_ :
+                                        last_scan_pose_ * (*wheel_relative);
     publishOdometry(coast_pose, wheel_now);
 
     // Tier 2 (optional): wheel-paced keyframes so marker anchors can still
@@ -1273,8 +1343,12 @@ void FusionNode::coastTick()
         }
         keyframe_map_
             ->add(pose_graph_->latestPose(), nullptr, nullptr, wheel_now, /*low_quality=*/true);
+        // Keep the smooth stream in step with the advanced scan state, then
+        // re-derive the correction from the optimized pose.
+        smooth_pose_     = smooth_pose_ * extension;
         last_scan_pose_  = pose_graph_->latestPose();
         last_scan_stamp_ = wheel_now;
+        updateMapOdomCorrection();
     }
 }
 
@@ -1474,12 +1548,15 @@ void FusionNode::publishOdometry(const gtsam::Pose3& pose, double stamp)
     odom_msg_.pose.pose    = gtsam_conversions::toRosPose(pose);
     odom_pub_->publish(odom_msg_);
 
-    if (!publish_map_tf_)
+    // When this node owns odom->base, both TF edges are sent together in
+    // publishSmoothOdometry so consumers always see a consistent snapshot.
+    if (!publish_map_tf_ || publish_odom_tf_)
         return;
 
-    // REP-105 split: broadcast only the map->odom correction. The continuous
-    // odom->base transform belongs to the wheel odometry source, so a global
-    // update here can never teleport the robot in the odom frame.
+    // REP-105 split (wheel-owned odom frame): broadcast only the map->odom
+    // correction. The continuous odom->base transform belongs to the wheel
+    // odometry source, so a global update here can never teleport the robot
+    // in the odom frame.
     const auto wheel_pose = wheel_buffer_.poseAt(stamp);
     if (!wheel_pose)
         return;
@@ -1496,6 +1573,62 @@ void FusionNode::publishOdometry(const gtsam::Pose3& pose, double stamp)
     tf.transform.translation.z = pose_msg.position.z;
     tf.transform.rotation      = pose_msg.orientation;
     tf_broadcaster_->sendTransform(tf);
+}
+
+void FusionNode::updateMapOdomCorrection()
+{
+    if (!publish_odom_tf_)
+        return;
+    // map->odom = (map->base) o (odom->base)^-1 at the scan stamp, where
+    // odom->base = smooth (odom->footprint) o (footprint->base). Anchor and
+    // loop jumps land here and never in the smooth stream.
+    map_from_odom_  = last_scan_pose_ * (smooth_pose_ * child_from_base_).inverse();
+    map_odom_valid_ = true;
+}
+
+void FusionNode::publishSmoothOdometry(const gtsam::Pose3& odom_from_child, double stamp)
+{
+    if (!smooth_odom_pub_ || !smooth_odom_pub_->is_activated())
+        return;
+
+    smooth_odom_msg_.header.stamp = rclcpp::Time(static_cast<int64_t>(stamp * 1e9));
+    smooth_odom_msg_.pose.pose    = gtsam_conversions::toRosPose(odom_from_child);
+    smooth_odom_msg_.twist.twist  = last_wheel_twist_;
+    if (imu_buffer_.hasData())
+        smooth_odom_msg_.twist.twist.angular.z = imu_buffer_.rateNear(stamp).z();
+    smooth_odom_pub_->publish(smooth_odom_msg_);
+
+    if (!publish_odom_tf_)
+        return;
+
+    // Both TF edges in one broadcast so consumers always see a consistent
+    // snapshot: odom->base_footprint (smooth, jump-free) and map->odom (the
+    // correction — anchors and loop closures jump HERE, REP-105).
+    tf_batch_.clear();
+
+    geometry_msgs::msg::TransformStamped tf;
+    tf.header.stamp            = smooth_odom_msg_.header.stamp;
+    tf.header.frame_id         = odom_frame_;
+    tf.child_frame_id          = odom_child_frame_;
+    auto pose_msg              = gtsam_conversions::toRosPose(odom_from_child);
+    tf.transform.translation.x = pose_msg.position.x;
+    tf.transform.translation.y = pose_msg.position.y;
+    tf.transform.translation.z = pose_msg.position.z;
+    tf.transform.rotation      = pose_msg.orientation;
+    tf_batch_.push_back(tf);
+
+    if (publish_map_tf_ && map_odom_valid_)
+    {
+        tf.header.frame_id         = map_frame_;
+        tf.child_frame_id          = odom_frame_;
+        pose_msg                   = gtsam_conversions::toRosPose(map_from_odom_);
+        tf.transform.translation.x = pose_msg.position.x;
+        tf.transform.translation.y = pose_msg.position.y;
+        tf.transform.translation.z = pose_msg.position.z;
+        tf.transform.rotation      = pose_msg.orientation;
+        tf_batch_.push_back(tf);
+    }
+    tf_broadcaster_->sendTransform(tf_batch_);
 }
 
 }  // namespace olive
