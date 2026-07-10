@@ -3,8 +3,8 @@
  * @brief Keyframe database and local-map assembly for scan-to-map matching
  */
 
-#ifndef OLIVE_FUSION_KEYFRAME_MAP_HPP_
-#define OLIVE_FUSION_KEYFRAME_MAP_HPP_
+#ifndef OLIVE_FUSION_GRAPH_KEYFRAME_MAP_HPP_
+#define OLIVE_FUSION_GRAPH_KEYFRAME_MAP_HPP_
 
 #include <gtsam/geometry/Pose3.h>
 #include <pcl/filters/voxel_grid.h>
@@ -125,4 +125,4 @@ private:
 
 }  // namespace olive
 
-#endif  // OLIVE_FUSION_KEYFRAME_MAP_HPP_
+#endif  // OLIVE_FUSION_GRAPH_KEYFRAME_MAP_HPP_

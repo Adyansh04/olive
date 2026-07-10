@@ -1,4 +1,4 @@
-#include "olive/fusion/scan_matcher.hpp"
+#include "olive/fusion/frontend/scan_matcher.hpp"
 
 #include <pcl/common/transforms.h>
 

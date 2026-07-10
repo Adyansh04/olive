@@ -1,4 +1,4 @@
-#include "olive/fusion/scan_preprocessor.hpp"
+#include "olive/fusion/frontend/scan_preprocessor.hpp"
 
 #include <algorithm>
 #include <cmath>

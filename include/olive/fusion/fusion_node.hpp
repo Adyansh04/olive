@@ -30,17 +30,17 @@
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <whycode_vision/msg/why_code_pose_array.hpp>
 
-#include "olive/fusion/feature_extractor.hpp"
+#include "olive/fusion/frontend/feature_extractor.hpp"
 #include "olive/fusion/fusion_types.hpp"
 #include "olive/fusion/health_monitor.hpp"
-#include "olive/fusion/imu_buffer.hpp"
-#include "olive/fusion/keyframe_map.hpp"
-#include "olive/fusion/loop_detector.hpp"
-#include "olive/fusion/marker_gate.hpp"
-#include "olive/fusion/pose_graph.hpp"
-#include "olive/fusion/scan_matcher.hpp"
-#include "olive/fusion/scan_preprocessor.hpp"
-#include "olive/fusion/wheel_odom_buffer.hpp"
+#include "olive/fusion/inputs/imu_buffer.hpp"
+#include "olive/fusion/graph/keyframe_map.hpp"
+#include "olive/fusion/graph/loop_detector.hpp"
+#include "olive/fusion/inputs/marker_gate.hpp"
+#include "olive/fusion/graph/pose_graph.hpp"
+#include "olive/fusion/frontend/scan_matcher.hpp"
+#include "olive/fusion/frontend/scan_preprocessor.hpp"
+#include "olive/fusion/inputs/wheel_odom_buffer.hpp"
 
 namespace olive
 {

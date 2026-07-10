@@ -3,15 +3,15 @@
  * @brief ICP-based loop closure detection over the keyframe map
  */
 
-#ifndef OLIVE_FUSION_LOOP_DETECTOR_HPP_
-#define OLIVE_FUSION_LOOP_DETECTOR_HPP_
+#ifndef OLIVE_FUSION_GRAPH_LOOP_DETECTOR_HPP_
+#define OLIVE_FUSION_GRAPH_LOOP_DETECTOR_HPP_
 
 #include <gtsam/geometry/Pose3.h>
 
 #include <optional>
 
 #include "olive/fusion/fusion_types.hpp"
-#include "olive/fusion/keyframe_map.hpp"
+#include "olive/fusion/graph/keyframe_map.hpp"
 
 namespace olive
 {
@@ -69,4 +69,4 @@ private:
 
 }  // namespace olive
 
-#endif  // OLIVE_FUSION_LOOP_DETECTOR_HPP_
+#endif  // OLIVE_FUSION_GRAPH_LOOP_DETECTOR_HPP_

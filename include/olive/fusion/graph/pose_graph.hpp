@@ -3,8 +3,8 @@
  * @brief iSAM2-backed keyframe pose graph for the fusion backend
  */
 
-#ifndef OLIVE_FUSION_POSE_GRAPH_HPP_
-#define OLIVE_FUSION_POSE_GRAPH_HPP_
+#ifndef OLIVE_FUSION_GRAPH_POSE_GRAPH_HPP_
+#define OLIVE_FUSION_GRAPH_POSE_GRAPH_HPP_
 
 #include <gtsam/geometry/Point3.h>
 #include <gtsam/geometry/Pose3.h>
@@ -235,4 +235,4 @@ private:
 
 }  // namespace olive
 
-#endif  // OLIVE_FUSION_POSE_GRAPH_HPP_
+#endif  // OLIVE_FUSION_GRAPH_POSE_GRAPH_HPP_

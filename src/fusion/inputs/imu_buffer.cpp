@@ -1,4 +1,4 @@
-#include "olive/fusion/imu_buffer.hpp"
+#include "olive/fusion/inputs/imu_buffer.hpp"
 
 #include <algorithm>
 #include <cmath>

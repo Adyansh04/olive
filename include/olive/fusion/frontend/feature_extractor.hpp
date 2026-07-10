@@ -3,8 +3,8 @@
  * @brief Curvature-based edge / planar feature extraction from a ScanImage
  */
 
-#ifndef OLIVE_FUSION_FEATURE_EXTRACTOR_HPP_
-#define OLIVE_FUSION_FEATURE_EXTRACTOR_HPP_
+#ifndef OLIVE_FUSION_FRONTEND_FEATURE_EXTRACTOR_HPP_
+#define OLIVE_FUSION_FRONTEND_FEATURE_EXTRACTOR_HPP_
 
 #include <pcl/filters/voxel_grid.h>
 
@@ -53,4 +53,4 @@ private:
 
 }  // namespace olive
 
-#endif  // OLIVE_FUSION_FEATURE_EXTRACTOR_HPP_
+#endif  // OLIVE_FUSION_FRONTEND_FEATURE_EXTRACTOR_HPP_

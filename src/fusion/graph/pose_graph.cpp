@@ -1,4 +1,4 @@
-#include "olive/fusion/pose_graph.hpp"
+#include "olive/fusion/graph/pose_graph.hpp"
 
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/nonlinear/Marginals.h>
@@ -6,8 +6,8 @@
 #include <gtsam/slam/PriorFactor.h>
 #include <gtsam_unstable/slam/PartialPriorFactor.h>
 
-#include "olive/fusion/marker_anchor_factor.hpp"
-#include "olive/fusion/marker_observation_factor.hpp"
+#include "olive/fusion/graph/marker_anchor_factor.hpp"
+#include "olive/fusion/graph/marker_observation_factor.hpp"
 
 namespace olive
 {

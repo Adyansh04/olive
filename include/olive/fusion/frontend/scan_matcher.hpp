@@ -3,8 +3,8 @@
  * @brief Scan-to-map registration of edge/planar features via Gauss-Newton
  */
 
-#ifndef OLIVE_FUSION_SCAN_MATCHER_HPP_
-#define OLIVE_FUSION_SCAN_MATCHER_HPP_
+#ifndef OLIVE_FUSION_FRONTEND_SCAN_MATCHER_HPP_
+#define OLIVE_FUSION_FRONTEND_SCAN_MATCHER_HPP_
 
 #include <pcl/kdtree/kdtree_flann.h>
 
@@ -82,4 +82,4 @@ private:
 
 }  // namespace olive
 
-#endif  // OLIVE_FUSION_SCAN_MATCHER_HPP_
+#endif  // OLIVE_FUSION_FRONTEND_SCAN_MATCHER_HPP_

@@ -5,7 +5,7 @@
 
 #include <gtest/gtest.h>
 
-#include "olive/fusion/wheel_odom_buffer.hpp"
+#include "olive/fusion/inputs/wheel_odom_buffer.hpp"
 
 namespace
 {

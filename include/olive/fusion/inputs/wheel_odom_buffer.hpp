@@ -3,8 +3,8 @@
  * @brief Thread-safe wheel odometry buffer with interpolated pose queries
  */
 
-#ifndef OLIVE_FUSION_WHEEL_ODOM_BUFFER_HPP_
-#define OLIVE_FUSION_WHEEL_ODOM_BUFFER_HPP_
+#ifndef OLIVE_FUSION_INPUTS_WHEEL_ODOM_BUFFER_HPP_
+#define OLIVE_FUSION_INPUTS_WHEEL_ODOM_BUFFER_HPP_
 
 #include <gtsam/geometry/Pose3.h>
 
@@ -59,4 +59,4 @@ private:
 
 }  // namespace olive
 
-#endif  // OLIVE_FUSION_WHEEL_ODOM_BUFFER_HPP_
+#endif  // OLIVE_FUSION_INPUTS_WHEEL_ODOM_BUFFER_HPP_

@@ -3,8 +3,8 @@
  * @brief Gating and buffering of fiducial marker detections
  */
 
-#ifndef OLIVE_FUSION_MARKER_GATE_HPP_
-#define OLIVE_FUSION_MARKER_GATE_HPP_
+#ifndef OLIVE_FUSION_INPUTS_MARKER_GATE_HPP_
+#define OLIVE_FUSION_INPUTS_MARKER_GATE_HPP_
 
 #include <gtsam/geometry/Point3.h>
 
@@ -87,4 +87,4 @@ private:
 
 }  // namespace olive
 
-#endif  // OLIVE_FUSION_MARKER_GATE_HPP_
+#endif  // OLIVE_FUSION_INPUTS_MARKER_GATE_HPP_

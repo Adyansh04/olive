@@ -1,4 +1,4 @@
-#include "olive/fusion/keyframe_map.hpp"
+#include "olive/fusion/graph/keyframe_map.hpp"
 
 #include <algorithm>
 #include <cmath>

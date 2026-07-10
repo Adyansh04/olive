@@ -3,8 +3,8 @@
  * @brief Converts incoming PointCloud2 scans into the ring-major ScanImage layout
  */
 
-#ifndef OLIVE_FUSION_SCAN_PREPROCESSOR_HPP_
-#define OLIVE_FUSION_SCAN_PREPROCESSOR_HPP_
+#ifndef OLIVE_FUSION_FRONTEND_SCAN_PREPROCESSOR_HPP_
+#define OLIVE_FUSION_FRONTEND_SCAN_PREPROCESSOR_HPP_
 
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <vector>
@@ -67,4 +67,4 @@ void deskewScan(
 
 }  // namespace olive
 
-#endif  // OLIVE_FUSION_SCAN_PREPROCESSOR_HPP_
+#endif  // OLIVE_FUSION_FRONTEND_SCAN_PREPROCESSOR_HPP_

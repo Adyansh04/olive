@@ -10,7 +10,7 @@
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/slam/PriorFactor.h>
 
-#include "olive/fusion/marker_anchor_factor.hpp"
+#include "olive/fusion/graph/marker_anchor_factor.hpp"
 
 namespace
 {

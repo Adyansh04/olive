@@ -3,8 +3,8 @@
  * @brief Thread-safe IMU sample buffer providing short-horizon rotation prediction
  */
 
-#ifndef OLIVE_FUSION_IMU_BUFFER_HPP_
-#define OLIVE_FUSION_IMU_BUFFER_HPP_
+#ifndef OLIVE_FUSION_INPUTS_IMU_BUFFER_HPP_
+#define OLIVE_FUSION_INPUTS_IMU_BUFFER_HPP_
 
 #include <Eigen/Geometry>
 #include <deque>
@@ -98,4 +98,4 @@ private:
 
 }  // namespace olive
 
-#endif  // OLIVE_FUSION_IMU_BUFFER_HPP_
+#endif  // OLIVE_FUSION_INPUTS_IMU_BUFFER_HPP_

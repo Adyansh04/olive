@@ -73,17 +73,21 @@ set(COMMON_DEPENDENCIES
 # Node: fusion core (LiDAR-inertial front-end + keyframe factor graph)
 add_executable(fusion_node
   src/nodes/fusion_node_main.cpp
-  src/fusion/fusion_node.cpp
-  src/fusion/imu_buffer.cpp
-  src/fusion/scan_preprocessor.cpp
-  src/fusion/feature_extractor.cpp
-  src/fusion/scan_matcher.cpp
-  src/fusion/keyframe_map.cpp
-  src/fusion/pose_graph.cpp
-  src/fusion/wheel_odom_buffer.cpp
-  src/fusion/marker_gate.cpp
+  src/fusion/fusion_node_lifecycle.cpp
+  src/fusion/fusion_node_sensors.cpp
+  src/fusion/fusion_node_lidar.cpp
+  src/fusion/fusion_node_publish.cpp
+  src/fusion/fusion_node_debug.cpp
   src/fusion/health_monitor.cpp
-  src/fusion/loop_detector.cpp
+  src/fusion/frontend/scan_preprocessor.cpp
+  src/fusion/frontend/feature_extractor.cpp
+  src/fusion/frontend/scan_matcher.cpp
+  src/fusion/graph/pose_graph.cpp
+  src/fusion/graph/keyframe_map.cpp
+  src/fusion/graph/loop_detector.cpp
+  src/fusion/inputs/imu_buffer.cpp
+  src/fusion/inputs/wheel_odom_buffer.cpp
+  src/fusion/inputs/marker_gate.cpp
 )
 ament_target_dependencies(fusion_node ${COMMON_DEPENDENCIES} whycode_vision)
 target_link_libraries(fusion_node ${PCL_LIBRARIES} gtsam gtsam_unstable)
@@ -120,20 +124,21 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}
 )
 
-# Install test / calibration scripts (ros2 run olive <script>)
+# Install test / calibration scripts (ros2 run olive <script> — the install
+# destination is flat, so invocations are unaffected by the subfolder layout)
 install(PROGRAMS
-  scripts/bringup_test.sh
-  scripts/drive_test.py
-  scripts/square_drive.py
-  scripts/ate_eval.py
-  scripts/analyze_bag.py
-  scripts/plot_results.py
-  scripts/marker_demo.py
-  scripts/calibrate_marker_range.py
-  scripts/imu_bias_relay.py
-  scripts/wheel_odom_relay.py
-  scripts/endurance_test.py
-  scripts/lidar_gate_relay.py
+  scripts/bringup/bringup_test.sh
+  scripts/bringup/square_drive.py
+  scripts/bringup/calibrate_marker_range.py
+  scripts/evaluation/drive_test.py
+  scripts/evaluation/ate_eval.py
+  scripts/evaluation/analyze_bag.py
+  scripts/evaluation/plot_results.py
+  scripts/evaluation/marker_demo.py
+  scripts/evaluation/endurance_test.py
+  scripts/fault_injection/imu_bias_relay.py
+  scripts/fault_injection/wheel_odom_relay.py
+  scripts/fault_injection/lidar_gate_relay.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -150,7 +155,7 @@ if(BUILD_TESTING)
   ament_target_dependencies(test_covariance_utils geometry_msgs)
   target_link_libraries(test_covariance_utils gtsam)
 
-  ament_add_gtest(test_scan_matcher test/test_scan_matcher.cpp src/fusion/scan_matcher.cpp)
+  ament_add_gtest(test_scan_matcher test/test_scan_matcher.cpp src/fusion/frontend/scan_matcher.cpp)
   target_link_libraries(test_scan_matcher ${PCL_LIBRARIES})
 
   ament_add_gtest(test_marker_anchor test/test_marker_anchor.cpp)
@@ -159,31 +164,33 @@ if(BUILD_TESTING)
   ament_add_gtest(test_marker_observation test/test_marker_observation.cpp)
   target_link_libraries(test_marker_observation gtsam)
 
-  ament_add_gtest(test_marker_gate test/test_marker_gate.cpp src/fusion/marker_gate.cpp)
+  ament_add_gtest(test_marker_gate test/test_marker_gate.cpp src/fusion/inputs/marker_gate.cpp)
   target_link_libraries(test_marker_gate gtsam)
 
-  ament_add_gtest(test_pose_graph test/test_pose_graph.cpp src/fusion/pose_graph.cpp)
+  ament_add_gtest(test_pose_graph test/test_pose_graph.cpp src/fusion/graph/pose_graph.cpp)
   target_link_libraries(test_pose_graph gtsam gtsam_unstable)
 
-  ament_add_gtest(test_imu_buffer test/test_imu_buffer.cpp src/fusion/imu_buffer.cpp)
+  ament_add_gtest(test_imu_buffer test/test_imu_buffer.cpp src/fusion/inputs/imu_buffer.cpp)
   target_include_directories(test_imu_buffer PRIVATE ${EIGEN3_INCLUDE_DIRS})
 
   ament_add_gtest(test_wheel_odom_buffer
-    test/test_wheel_odom_buffer.cpp src/fusion/wheel_odom_buffer.cpp)
+    test/test_wheel_odom_buffer.cpp src/fusion/inputs/wheel_odom_buffer.cpp)
   target_link_libraries(test_wheel_odom_buffer gtsam)
 
   ament_add_gtest(test_scan_preprocessor
-    test/test_scan_preprocessor.cpp src/fusion/scan_preprocessor.cpp src/fusion/imu_buffer.cpp)
+    test/test_scan_preprocessor.cpp src/fusion/frontend/scan_preprocessor.cpp
+    src/fusion/inputs/imu_buffer.cpp)
   ament_target_dependencies(test_scan_preprocessor sensor_msgs)
   target_link_libraries(test_scan_preprocessor ${PCL_LIBRARIES})
 
-  ament_add_gtest(test_keyframe_map test/test_keyframe_map.cpp src/fusion/keyframe_map.cpp)
+  ament_add_gtest(test_keyframe_map test/test_keyframe_map.cpp src/fusion/graph/keyframe_map.cpp)
   target_link_libraries(test_keyframe_map ${PCL_LIBRARIES} gtsam)
 
   ament_add_gtest(test_health_monitor test/test_health_monitor.cpp src/fusion/health_monitor.cpp)
 
   ament_add_gtest(test_loop_detector
-    test/test_loop_detector.cpp src/fusion/loop_detector.cpp src/fusion/keyframe_map.cpp)
+    test/test_loop_detector.cpp src/fusion/graph/loop_detector.cpp
+    src/fusion/graph/keyframe_map.cpp)
   target_link_libraries(test_loop_detector ${PCL_LIBRARIES} gtsam)
 endif()
 

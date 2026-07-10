@@ -1,4 +1,4 @@
-#include "olive/fusion/feature_extractor.hpp"
+#include "olive/fusion/frontend/feature_extractor.hpp"
 
 #include <algorithm>
 #include <cmath>

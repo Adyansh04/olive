@@ -38,6 +38,24 @@ The LiDAR-inertial core follows the architecture of [LIO-SAM](https://github.com
 - **`vo_node`** — monocular VO front-end: KLT tracking + essential matrix, yaw from in-place rotation, translation scaled by wheel motion (monocular scale is unobservable on a planar robot). Publishes `/olive/visual_odom`.
 - **`whycon`** (from `whycode_vision`) — marker detector, launched when `markers` is enabled; sim configs live in `config/whycode_detector_sim.yaml`.
 
+Source layout (mirrored in `include/olive/`):
+
+```
+src/
+  nodes/              executable mains
+  fusion/             FusionNode split by concern:
+    fusion_node_lifecycle.cpp   parameters, config, lifecycle transitions
+    fusion_node_sensors.cpp     IMU/wheel/marker callbacks, IMU init, bias
+    fusion_node_lidar.cpp       scan hot path, factor insertion, iSAM2, loops
+    fusion_node_publish.cpp     odometry outputs, TF, diagnostics
+    fusion_node_debug.cpp       RViz debug visualization
+    frontend/         scan preprocessing, feature extraction, scan matching
+    graph/            pose graph, keyframe map, loop detection, marker factors
+    inputs/           IMU / wheel-odom buffers, marker gate
+  vo/                 monocular VO front-end
+scripts/              bringup/ · evaluation/ · fault_injection/  (see scripts/README.md)
+```
+
 ## Build & run
 
 ```zsh
@@ -120,7 +138,7 @@ Gazebo Harmonic, maze world (16×16 m), 3 loops of a 56 m square. The maze is
 textured (tiled floor, brick/panel/block walls), dressed with wall paintings and
 3-D props, and its markers sit on white backing panels — feature-rich enough for
 the monocular VO front-end. Figures are generated from a recorded bag by
-[`scripts/plot_results.py`](scripts/plot_results.py).
+[`scripts/evaluation/plot_results.py`](scripts/evaluation/plot_results.py).
 
 | Metric | Value |
 |--------|-------|
@@ -196,15 +214,15 @@ in-place turns — is a possible future improvement; the fusion does not need it
 - **Marker odometry / LiDAR blackout**: during a 25 s LiDAR outage, marker
   observations pull the coasted trajectory back to **1.1 cm** final error;
   with markers off the same outage drifts 4.9 m and never recovers.
-- **Corrupted wheel odometry** (`scripts/wheel_odom_relay.py`, ~13 m injected
+- **Corrupted wheel odometry** (`scripts/fault_injection/wheel_odom_relay.py`, ~13 m injected
   drift): the fused output is unchanged — LiDAR + markers carry the estimate.
 - **Loop closure** (crippled matcher, no wheel factors): an out-and-back route
   improves from 4.44 m to **0.39 m** final error (11×).
 - **Endurance**: a 10-minute continuous drive with bounded cloud storage ends
   1–2 cm from ground truth, with per-sensor `/diagnostics` health throughout.
 
-Reproduce: record with [`scripts/square_drive.py`](scripts/square_drive.py) +
+Reproduce: record with [`scripts/bringup/square_drive.py`](scripts/bringup/square_drive.py) +
 `ros2 bag record`, analyse offline with
-[`scripts/analyze_bag.py`](scripts/analyze_bag.py), and regenerate these
-figures with `scripts/plot_results.py`. A full replay walkthrough is in
+[`scripts/evaluation/analyze_bag.py`](scripts/evaluation/analyze_bag.py), and regenerate these
+figures with `scripts/evaluation/plot_results.py`. A full replay walkthrough is in
 `demo/REPLAY_GUIDE.md`.

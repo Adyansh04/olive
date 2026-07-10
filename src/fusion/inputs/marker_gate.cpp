@@ -1,4 +1,4 @@
-#include "olive/fusion/marker_gate.hpp"
+#include "olive/fusion/inputs/marker_gate.hpp"
 
 #include <algorithm>
 

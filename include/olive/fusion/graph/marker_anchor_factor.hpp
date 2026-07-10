@@ -9,8 +9,8 @@
  * orientation estimates flip under out-of-plane tilt and are unreliable.
  */
 
-#ifndef OLIVE_FUSION_MARKER_ANCHOR_FACTOR_HPP_
-#define OLIVE_FUSION_MARKER_ANCHOR_FACTOR_HPP_
+#ifndef OLIVE_FUSION_GRAPH_MARKER_ANCHOR_FACTOR_HPP_
+#define OLIVE_FUSION_GRAPH_MARKER_ANCHOR_FACTOR_HPP_
 
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/nonlinear/NonlinearFactor.h>
@@ -64,4 +64,4 @@ private:
 
 }  // namespace olive
 
-#endif  // OLIVE_FUSION_MARKER_ANCHOR_FACTOR_HPP_
+#endif  // OLIVE_FUSION_GRAPH_MARKER_ANCHOR_FACTOR_HPP_

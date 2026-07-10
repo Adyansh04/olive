@@ -15,7 +15,7 @@ from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
 BAG = os.environ.get("OLIVE_BAG", os.path.expanduser("~/olive_ws/bags/maze_square_3loops"))
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "media")
+OUT = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "media")
 MARKERS = [(7.5, 7.5), (-7.5, 7.5), (-7.5, -7.5), (7.5, -7.5)]
 os.makedirs(OUT, exist_ok=True)
 

@@ -1,4 +1,4 @@
-#include "olive/fusion/loop_detector.hpp"
+#include "olive/fusion/graph/loop_detector.hpp"
 
 #include <pcl/common/transforms.h>
 #include <pcl/filters/voxel_grid.h>
