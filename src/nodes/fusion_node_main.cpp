@@ -3,6 +3,7 @@
  * @brief Entry point for the OLIVE fusion node
  */
 
+#include <rclcpp/experimental/executors/events_executor/events_executor.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 #include "olive/fusion/fusion_node.hpp"
@@ -13,7 +14,9 @@ int main(int argc, char** argv)
 
     auto node = std::make_shared<olive::FusionNode>();
 
-    rclcpp::executors::SingleThreadedExecutor executor;
+    // Event-driven executor: no per-iteration wait-set rebuild/poll. Still
+    // single-threaded, which the scan pipeline's reused buffers rely on.
+    rclcpp::experimental::executors::EventsExecutor executor;
     executor.add_node(node->get_node_base_interface());
     executor.spin();
 
