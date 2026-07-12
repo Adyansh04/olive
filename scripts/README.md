@@ -55,7 +55,8 @@ ros2 run olive calibrate_marker_range.py --current-multiplier 1.096
 ```
 
 Reference numbers (maze world, headless, full stack: landmarks + tight IMU
-coupling + smooth odom): drive test ~1-2 cm / 0.2°; ATE post-anchor RMSE
-0.056 m, yaw ~0.2°; anchor snap 8.49 m → 0.06 m absorbed entirely by
-map→odom (local stream max step 3-4 cm); free-landmark convergence 6-8 cm;
-online gyro-bias step recovery within ~25 s.
+coupling + smooth odom + VO): drive test ~1-2 cm / 0.2-0.4°; 3-loop ATE
+post-anchor RMSE 0.020 m (max 0.046 m); anchor snap 8.49 m absorbed entirely
+by map→odom (local stream max step 2-4 cm); free-landmark convergence 6-8 cm;
+online gyro-bias step recovery within ~25 s. CPU numbers and per-change
+benchmarks live in ../benchmark/RESULTS.md.

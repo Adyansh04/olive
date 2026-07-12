@@ -1,11 +1,11 @@
 # OLIVE
 
-**O**ptimization of **L**idar, **I**nertial, **V**ision & **E**ncoders — graph-based multi-modal sensor fusion for a planar ground robot. ROS 2 **Jazzy**, C++17, [GTSAM](https://github.com/borglab/gtsam) factor-graph backend.
+**O**ptimization of **L**idar, **I**nertial, **V**ision & **E**ncoders — graph-based multi-modal sensor fusion for a planar ground robot. ROS 2 **Jazzy**, C++20, [GTSAM](https://github.com/borglab/gtsam) factor-graph backend.
 
 One iSAM2 keyframe graph fuses LiDAR, IMU (tightly coupled), wheel encoders, WhyCode fiducials and monocular visual odometry, with ICP loop closure. It produces both a globally-accurate map-frame pose and a smooth, jump-free odom-frame stream — a drop-in localization backend for Nav2.
 
 <p align="center">
-<img src="media/trajectory.png" width="49%" alt="Fused trajectory vs ground truth over 3 maze loops (2.3 cm RMSE)">
+<img src="media/trajectory.png" width="49%" alt="Fused trajectory vs ground truth over 3 maze loops (2.0 cm RMSE)">
 <img src="media/local_vs_wheel.png" width="49%" alt="Smooth local odometry stays tight while raw wheel odometry drifts">
 </p>
 
@@ -54,6 +54,7 @@ src/
     inputs/           IMU / wheel-odom buffers, marker gate
   vo/                 monocular VO front-end
 scripts/              bringup/ · evaluation/ · fault_injection/  (see scripts/README.md)
+benchmark/            full-stack replay + micro benchmarks, per-change results log
 ```
 
 ## Build & run
@@ -132,10 +133,13 @@ multi-metre `map→odom` jump).
 ## Tests
 
 ```zsh
-colcon test --packages-select olive   # covariance conventions, scan matcher on
-                                      # synthetic geometry, marker anchor factor
-                                      # (analytic vs numerical Jacobians, drift recovery)
+colcon test --packages-select olive && colcon test-result
 ```
+
+65 unit tests across 12 suites: covariance conventions, scan preprocessing and
+matching on synthetic geometry, keyframe map + cloud budget, marker
+anchor/observation factors (analytic vs numerical Jacobians, drift recovery),
+buffers, health monitoring, and loop detection.
 
 ## Results
 
@@ -147,11 +151,11 @@ the monocular VO front-end. Figures are generated from a recorded bag by
 
 | Metric | Value |
 |--------|-------|
-| Absolute trajectory error (post-anchor, vs ground truth) | **2.3 cm RMSE**, 4.8 cm max |
+| Absolute trajectory error (post-anchor, vs ground truth) | **2.0 cm RMSE**, 4.6 cm max |
 | Fused ATE, VO on vs off (steady-state) | **~2 cm vs 3.6 cm** — VO on is not worse (tight-sigma VO: 29 m) |
-| Drive-test relative accuracy (35 s multi-turn) | **1.4 cm / 0.22°** |
+| Drive-test relative accuracy (35 s multi-turn) | **0.8 cm / 0.04°** |
 | First-anchor drift reset (spawn frame → world) | 8.5 m → few cm, one sighting |
-| Local-stream max step, 3 loops (all corrections in `map→odom`) | **4.2 cm** |
+| Local-stream max step, 3 loops (all corrections in `map→odom`) | **2.4 cm** |
 | Monocular VO scale accuracy (path length vs ground truth) | **0.98** (heading drifts uncorrected — fused loose) |
 | Unsurveyed-marker landmark convergence | **6–8 cm** from sightings alone |
 | LiDAR-core throughput | 10 Hz, 6–12 ms/scan |
@@ -229,5 +233,5 @@ in-place turns — is a possible future improvement; the fusion does not need it
 Reproduce: record with [`scripts/bringup/square_drive.py`](scripts/bringup/square_drive.py) +
 `ros2 bag record`, analyse offline with
 [`scripts/evaluation/analyze_bag.py`](scripts/evaluation/analyze_bag.py), and regenerate these
-figures with `scripts/evaluation/plot_results.py`. A full replay walkthrough is in
-`demo/REPLAY_GUIDE.md`.
+figures with `scripts/evaluation/plot_results.py`. For CPU numbers, use the
+fixed replay benchmark in [`benchmark/`](benchmark/README.md).
