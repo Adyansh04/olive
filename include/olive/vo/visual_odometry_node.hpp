@@ -24,6 +24,8 @@
 #include <rclcpp_lifecycle/lifecycle_publisher.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <std_msgs/msg/header.hpp>
+#include <string>
 #include <vector>
 
 namespace olive
@@ -53,6 +55,22 @@ private:
     void adoptKeyframe(const cv::Mat& gray, double stamp);
     void publishOdometry(double stamp);
 
+    /// Draw the tracked features / optical flow / gate status onto the camera
+    /// frame and publish it on the debug image topic (RViz Image display).
+    /// @param rgb    current frame (rgb8, drawn on a copy)
+    /// @param from   keyframe feature positions (flow tails); empty on adopt
+    /// @param to     current tracked positions (flow heads / dots)
+    /// @param inliers per-correspondence essential-matrix inlier mask, or empty
+    /// @param status short HUD line explaining what VO is doing this frame
+    /// @param header source image header (reused for stamp + camera frame)
+    void publishDebugImage(
+        const cv::Mat&                  rgb,
+        const std::vector<cv::Point2f>& from,
+        const std::vector<cv::Point2f>& to,
+        const cv::Mat&                  inliers,
+        const std::string&              status,
+        const std_msgs::msg::Header&    header);
+
     // Topics / params
     std::string image_topic_;
     std::string camera_info_topic_;
@@ -66,7 +84,8 @@ private:
     double      ransac_threshold_ = 1.0;
     double      min_wheel_motion_ = 0.03;
     double      max_keyframe_age_ = 2.0;  ///< re-adopt keyframe past this age (< wheel history)
-    bool        debug_ = false;  ///< log per-frame gate values (why VO is/isn't publishing)
+    bool        debug_        = false;  ///< log per-frame gate values (why VO is/isn't publishing)
+    bool publish_debug_image_ = false;  ///< draw features/flow overlay on /olive/debug/vo_image
 
     // Camera intrinsics (from camera_info)
     bool        have_intrinsics_ = false;
@@ -89,6 +108,7 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr            camera_info_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr                 wheel_sub_;
     rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
+    rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::Image>::SharedPtr debug_image_pub_;
     nav_msgs::msg::Odometry                                                  odom_msg_;
     rclcpp::TimerBase::SharedPtr                                             autostart_timer_;
 };

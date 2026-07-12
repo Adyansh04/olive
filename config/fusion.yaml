@@ -279,3 +279,4 @@ vo_node:
     min_wheel_motion_m: 0.015
     max_keyframe_age_s: 2.0   # force keyframe re-adopt (< wheel buffer) so a stall never wedges VO
     debug: false          # set true to log per-frame gate values (why VO is/ isn't publishing)
+    publish_debug_image: true  # feature/flow overlay on /olive/debug/vo_image (RViz Image display)
