@@ -39,7 +39,8 @@ VisualOdometryNode::VisualOdometryNode(const rclcpp::NodeOptions& options)
     }
 }
 
-VisualOdometryNode::CallbackReturn VisualOdometryNode::on_configure(const rclcpp_lifecycle::State&)
+VisualOdometryNode::CallbackReturn
+    VisualOdometryNode::on_configure(const rclcpp_lifecycle::State& /*state*/)
 {
     image_topic_       = get_parameter("image_topic").as_string();
     camera_info_topic_ = get_parameter("camera_info_topic").as_string();
@@ -103,7 +104,8 @@ VisualOdometryNode::CallbackReturn
     return CallbackReturn::SUCCESS;
 }
 
-VisualOdometryNode::CallbackReturn VisualOdometryNode::on_cleanup(const rclcpp_lifecycle::State&)
+VisualOdometryNode::CallbackReturn
+    VisualOdometryNode::on_cleanup(const rclcpp_lifecycle::State& /*state*/)
 {
     image_sub_.reset();
     camera_info_sub_.reset();

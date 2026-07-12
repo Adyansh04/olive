@@ -1,6 +1,7 @@
 #include "olive/fusion/frontend/scan_preprocessor.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstring>
 #include <iterator>
@@ -125,6 +126,7 @@ public:
 
     float relTime(size_t index) const
     {
+        assert(reader_.has_value());  // relTime is only reachable after found()
         const double raw = reader_->read(index);
         if (is_nanoseconds_)
             return static_cast<float>(raw * 1e-9);

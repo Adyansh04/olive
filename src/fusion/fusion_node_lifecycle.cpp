@@ -449,7 +449,7 @@ void FusionNode::loadConfiguration()
         lidar_between_sigmas_[i] = sigmas[i];
 }
 
-FusionNode::CallbackReturn FusionNode::on_configure(const rclcpp_lifecycle::State&)
+FusionNode::CallbackReturn FusionNode::on_configure(const rclcpp_lifecycle::State& /*state*/)
 {
     loadConfiguration();
 
@@ -612,7 +612,7 @@ FusionNode::CallbackReturn FusionNode::on_deactivate(const rclcpp_lifecycle::Sta
     return CallbackReturn::SUCCESS;
 }
 
-FusionNode::CallbackReturn FusionNode::on_cleanup(const rclcpp_lifecycle::State&)
+FusionNode::CallbackReturn FusionNode::on_cleanup(const rclcpp_lifecycle::State& /*state*/)
 {
     points_sub_.reset();
     imu_sub_.reset();

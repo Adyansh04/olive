@@ -148,9 +148,9 @@ void FeatureExtractor::selectFeatures(const ScanImage& scan, FeatureClouds& out)
 
             // Planar candidates: lowest curvature first, with the same
             // neighbor suppression to spread them out.
-            for (size_t k = 0; k < sortable_.size(); ++k)
+            for (const auto& candidate : sortable_)
             {
-                const int ind = sortable_[k].second;
+                const int ind = candidate.second;
                 if (picked_[ind] != 0 || curvature_[ind] >= config_.planar_threshold)
                     continue;
 

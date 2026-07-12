@@ -125,7 +125,7 @@ void FusionNode::publishFiducialDebug(double stamp)
 {
     if (!debug_fiducials_)
         return;
-    constexpr double   RECENT = 3.0;  // anchor highlight duration (s)
+    constexpr double   recent_highlight_s = 3.0;  // anchor highlight duration
     const rclcpp::Time ros_stamp(static_cast<int64_t>(stamp * 1e9));
 
     visualization_msgs::msg::MarkerArray array;
@@ -133,7 +133,7 @@ void FusionNode::publishFiducialDebug(double stamp)
     {
         const auto event  = anchor_event_times_.find(id);
         const bool seen   = event != anchor_event_times_.end();
-        const bool recent = seen && (stamp - event->second) < RECENT;
+        const bool recent = seen && (stamp - event->second) < recent_highlight_s;
 
         visualization_msgs::msg::Marker sphere;
         sphere.header.frame_id    = map_frame_;

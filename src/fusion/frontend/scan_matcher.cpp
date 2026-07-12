@@ -295,9 +295,9 @@ bool ScanMatcher::gaussNewtonStep(MatcherPose& pose, int iteration)
         std::pow(update(0) * 180.0F / static_cast<float>(std::numbers::pi), 2) +
         std::pow(update(1) * 180.0F / static_cast<float>(std::numbers::pi), 2) +
         std::pow(update(2) * 180.0F / static_cast<float>(std::numbers::pi), 2));
-    const float delta_translation = std::sqrt(
+    const float delta_translation = static_cast<float>(std::sqrt(
         std::pow(update(3) * 100.0F, 2) + std::pow(update(4) * 100.0F, 2) +
-        std::pow(update(5) * 100.0F, 2));
+        std::pow(update(5) * 100.0F, 2)));
 
     return delta_rotation < 0.05F && delta_translation < 0.05F;
 }
