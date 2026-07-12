@@ -97,7 +97,8 @@ ros2 launch olive_sim simulation.launch.py world_name:=maze headless:=true
 
 # 2. Fusion stack — reads config/fusion.yaml, starts only the modalities enabled
 #    under `modalities:`, and hands each node its parameter section.
-#    rviz:=true opens the debug view; config_file:=<path> overrides fusion.yaml.
+#    rviz:=true opens the debug view; config_file:=<path> overrides fusion.yaml;
+#    debug:=off force-disables every debug stream for a peak-performance run.
 ros2 launch olive sensor_fusion.launch.py rviz:=true
 
 # 3. Drive a repeatable closed-loop square (chases corners via /ground_truth)
@@ -105,8 +106,9 @@ ros2 run olive square_drive.py --half 7.0 --loops 3 --speed 0.4
 ```
 
 Fused output appears on `/olive/odometry` (map frame) and `/olive/odometry_local`
-(smooth odom frame); debug streams are under `/olive/debug/*` (off by default —
-enable in `config/fusion.yaml`).
+(smooth odom frame); debug streams are under `/olive/debug/*` (on in the sim
+config). Pass `debug:=off` to disable them all in one shot for a peak-performance
+run, or toggle individual flags in `config/fusion.yaml`.
 
 **Record once, replay offline** — the cheap iteration loop, and what the
 benchmarks use. Capture the raw sensor streams with the sim running, then replay
