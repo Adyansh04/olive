@@ -13,6 +13,13 @@ DB=/home/adyansh/olive_ws/build/olive/compile_commands.json
 OUT=/home/adyansh/olive_ws/perf_data/micro
 mkdir -p "$OUT"
 
+# Prefer source-built deps (BUILDING.md) for link + runtime when present, so
+# the bench links exactly what the package links.
+DEPLIBS=()
+for d in /home/adyansh/olive_ws/deps/pcl-install/lib /home/adyansh/olive_ws/deps/gtsam-install/lib; do
+  [[ -d "$d" ]] && DEPLIBS+=(-L$d -Wl,-rpath,$d)
+done
+
 case "$1" in
   scan_matcher)
     COMPONENT=src/fusion/frontend/scan_matcher.cpp
@@ -52,6 +59,6 @@ NAME=$(basename "$BENCH" .cpp)
 BIN=$OUT/$NAME
 eval g++ $FLAGS -I"$PKG/include" -c "$PKG/$COMPONENT" -o "$OUT/${NAME}_component.o"
 eval g++ $FLAGS -I"$PKG/include" -c "$BENCH" -o "$OUT/${NAME}.o"
-g++ "$OUT/${NAME}.o" "$OUT/${NAME}_component.o" -o "$BIN" "${LIBS[@]}" -lbenchmark -lpthread
+g++ "$OUT/${NAME}.o" "$OUT/${NAME}_component.o" -o "$BIN" "${DEPLIBS[@]}" "${LIBS[@]}" -lbenchmark -lpthread
 echo "built $BIN"
 taskset -c 0-15 "$BIN" "$@"
