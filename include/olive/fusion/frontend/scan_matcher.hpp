@@ -6,7 +6,7 @@
 #ifndef OLIVE_FUSION_FRONTEND_SCAN_MATCHER_HPP_
 #define OLIVE_FUSION_FRONTEND_SCAN_MATCHER_HPP_
 
-#include <pcl/kdtree/kdtree_flann.h>
+#include "olive/fusion/knn_tree.hpp"
 
 #include <Eigen/Dense>
 
@@ -65,8 +65,8 @@ private:
 
     MatcherConfig config_;
 
-    pcl::KdTreeFLANN<CloudPoint> edge_tree_;
-    pcl::KdTreeFLANN<CloudPoint> planar_tree_;
+    KnnTree<CloudPoint> edge_tree_;
+    KnnTree<CloudPoint> planar_tree_;
     Cloud::Ptr                   edge_map_;
     Cloud::Ptr                   planar_map_;
 

@@ -8,7 +8,7 @@
 
 #include <gtsam/geometry/Pose3.h>
 #include <pcl/filters/voxel_grid.h>
-#include <pcl/kdtree/kdtree_flann.h>
+#include "olive/fusion/knn_tree.hpp"
 
 #include <unordered_map>
 #include <vector>
@@ -134,7 +134,7 @@ private:
     // add() and updatePose(), each of which sets the dirty flag. A missed
     // invalidation would silently serve stale positions — keep the flag next
     // to every mutation site.
-    pcl::KdTreeFLANN<CloudPoint> position_tree_;
+    KnnTree<CloudPoint> position_tree_;
     bool                         position_tree_dirty_ = true;
 };
 

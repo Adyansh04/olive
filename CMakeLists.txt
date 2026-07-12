@@ -32,6 +32,14 @@ if(OLIVE_NATIVE_OPT)
   add_compile_options(-march=x86-64-v3)
 endif()
 
+# Faster kNN backend for the scan matcher (the #1 profiled hot zone).
+# Requires PCL >= 1.15 built with nanoflann (see BUILDING.md); the default
+# stays FLANN so the stock apt PCL 1.14 build keeps working.
+option(OLIVE_USE_NANOFLANN "Use pcl::search::KdTreeNanoflann for kNN search" OFF)
+if(OLIVE_USE_NANOFLANN)
+  add_compile_definitions(OLIVE_USE_NANOFLANN)
+endif()
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra)
 endif()
