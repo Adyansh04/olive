@@ -3,9 +3,9 @@ project(olive)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Default to C++17
+# Default to C++20 (probed clean against GTSAM 4.2 / PCL 1.14 / OpenCV 4.6)
 if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD 20)
 endif()
 
 # The scan-matching hot path needs an optimized build; -O0 cannot hold 10 Hz.
