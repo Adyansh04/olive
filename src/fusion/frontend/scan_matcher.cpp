@@ -68,8 +68,8 @@ bool ScanMatcher::align(const FeatureClouds& features, MatcherPose& pose)
 
 void ScanMatcher::addEdgeResiduals(const Cloud& edge_scan, const Eigen::Affine3f& transform)
 {
-    std::vector<int>   indices(5);
-    std::vector<float> sq_distances(5);
+    std::vector<int>&   indices      = knn_indices_;
+    std::vector<float>& sq_distances = knn_sq_distances_;
 
     for (const CloudPoint& point : edge_scan.points)
     {
@@ -95,7 +95,8 @@ void ScanMatcher::addEdgeResiduals(const Cloud& edge_scan, const Eigen::Affine3f
         }
         scatter /= 5.0F;
 
-        const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eig(scatter);
+        feature_solver_.compute(scatter);
+        const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f>& eig = feature_solver_;
         // Eigenvalues are ascending: [2] largest. Only a clearly linear
         // neighborhood defines a stable line.
         if (eig.eigenvalues()[2] <= 3.0F * eig.eigenvalues()[1])
@@ -132,8 +133,8 @@ void ScanMatcher::addEdgeResiduals(const Cloud& edge_scan, const Eigen::Affine3f
 
 void ScanMatcher::addPlanarResiduals(const Cloud& planar_scan, const Eigen::Affine3f& transform)
 {
-    std::vector<int>   indices(5);
-    std::vector<float> sq_distances(5);
+    std::vector<int>&   indices      = knn_indices_;
+    std::vector<float>& sq_distances = knn_sq_distances_;
 
     for (const CloudPoint& point : planar_scan.points)
     {
@@ -166,7 +167,8 @@ void ScanMatcher::addPlanarResiduals(const Cloud& planar_scan, const Eigen::Affi
             scatter += d * d.transpose();
         }
 
-        const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eig(scatter);
+        feature_solver_.compute(scatter);
+        const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f>& eig = feature_solver_;
         if (eig.eigenvalues()[1] < 0.05F * eig.eigenvalues()[2])
             continue;  // collinear
 
@@ -261,8 +263,8 @@ bool ScanMatcher::gaussNewtonStep(MatcherPose& pose, int iteration)
         eigenvalues_ = eig.eigenvalues();
 
         const Eigen::Matrix<float, 6, 6> eigenvectors = eig.eigenvectors().transpose();
-        Eigen::Matrix<float, 6, 6> constrained  = eigenvectors;
-        is_degenerate_                          = false;
+        Eigen::Matrix<float, 6, 6>       constrained  = eigenvectors;
+        is_degenerate_                                = false;
         for (int i = 0; i < 6; ++i)
         {
             if (eig.eigenvalues()[i] < config_.degeneracy_eigen_threshold)

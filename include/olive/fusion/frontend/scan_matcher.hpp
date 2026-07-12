@@ -75,6 +75,13 @@ private:
     Cloud residual_points_;
     Cloud residual_coeffs_;
 
+    // Reused per-iteration kNN scratch and 3x3 feature-fit solver (the scan
+    // pipeline is single-threaded — same invariant the residual clouds above
+    // already rely on).
+    std::vector<int>                               knn_indices_      = std::vector<int>(5);
+    std::vector<float>                             knn_sq_distances_ = std::vector<float>(5);
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> feature_solver_;
+
     bool                       is_degenerate_ = false;
     Eigen::Matrix<float, 6, 1> eigenvalues_   = Eigen::Matrix<float, 6, 1>::Zero();
     Eigen::Matrix<float, 6, 6> degeneracy_projector_;
