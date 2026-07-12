@@ -223,7 +223,7 @@ bool ScanPreprocessor::processUnorganized(const sensor_msgs::msg::PointCloud2& m
     if (msg.width < 64 || msg.height != 1)
         return false;
 
-    const std::string ring_name = config_.ring_field == "auto" ? "ring" : config_.ring_field;
+    const std::string  ring_name = config_.ring_field == "auto" ? "ring" : config_.ring_field;
     const ScalarReader ring_reader(msg, ring_name);
     if (!ring_reader.found())
         return false;  // cannot recover scan lines without a ring field
@@ -266,7 +266,12 @@ bool ScanPreprocessor::processUnorganized(const sensor_msgs::msg::PointCloud2& m
             azimuth += 2.0F * static_cast<float>(std::numbers::pi);
 
         rings[ring].push_back(
-            { azimuth, x, y, z, range, time_reader.found() ? time_reader.relTime(index) : 0.0F });
+            { .azimuth  = azimuth,
+              .x        = x,
+              .y        = y,
+              .z        = z,
+              .range    = range,
+              .rel_time = time_reader.found() ? time_reader.relTime(index) : 0.0F });
     }
 
     size_t columns_per_ring = 0;

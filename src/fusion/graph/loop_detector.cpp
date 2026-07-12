@@ -74,10 +74,10 @@ std::optional<LoopClosure> LoopDetector::detect(const KeyframeMap& map, size_t c
 
     // Submap: the candidate's cloud-bearing neighborhood at optimized poses.
     const Cloud::Ptr target(new Cloud);
-    const size_t lo = *candidate >= static_cast<size_t>(config_.submap_half_width) ?
-                          *candidate - config_.submap_half_width :
-                          0;
-    const size_t hi = std::min(map.size() - 1, *candidate + config_.submap_half_width);
+    const size_t     lo = *candidate >= static_cast<size_t>(config_.submap_half_width) ?
+                              *candidate - config_.submap_half_width :
+                              0;
+    const size_t     hi = std::min(map.size() - 1, *candidate + config_.submap_half_width);
     for (size_t i = lo; i <= hi; ++i)
     {
         // The current trajectory's own recent keyframes must not leak into
@@ -130,7 +130,9 @@ std::optional<LoopClosure> LoopDetector::detect(const KeyframeMap& map, size_t c
         relative = projectPlanar(relative);
     }
 
-    return LoopClosure{ *candidate, relative, icp.getFitnessScore() };
+    return LoopClosure{ .old_index = *candidate,
+                        .relative  = relative,
+                        .fitness   = icp.getFitnessScore() };
 }
 
 }  // namespace olive

@@ -26,14 +26,15 @@ void FusionNode::publishDiagnostics()
         diag.name        = "olive/" + status.name;
         diag.hardware_id = status.name;
 
+        using enum SensorHealth;
         switch (status.health)
         {
-            case SensorHealth::FAILED:
+            case FAILED:
                 diag.level   = diagnostic_msgs::msg::DiagnosticStatus::ERROR;
                 diag.message = status.age < 0.0 ? "no data" : "timed out";
                 break;
-            case SensorHealth::POOR:
-            case SensorHealth::DEGRADED:
+            case POOR:
+            case DEGRADED:
                 diag.level   = diagnostic_msgs::msg::DiagnosticStatus::WARN;
                 diag.message = status.detail.empty() ? "degraded" : status.detail;
                 break;

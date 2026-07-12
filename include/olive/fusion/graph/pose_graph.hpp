@@ -164,7 +164,7 @@ public:
     gtsam::imuBias::ConstantBias latestBias() const { return last_bias_; }
 
     /// Outcome of one incremental update round
-    enum class OptimizeResult
+    enum class [[nodiscard]] OptimizeResult
     {
         OK,         ///< factors applied; only the newest pose moved meaningfully
         CORRECTED,  ///< a global factor bent past poses — refresh caches

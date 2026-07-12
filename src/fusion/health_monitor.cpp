@@ -10,7 +10,7 @@ void HealthMonitor::configure(const std::vector<SensorSpec>& sensors)
     for (const SensorSpec& spec : sensors)
     {
         order_.push_back(spec.name);
-        sensors_[spec.name] = Entry{ spec, -1.0, SensorHealth::GOOD, {} };
+        sensors_[spec.name] = Entry{ .spec = spec };  // other fields keep their defaults
     }
 }
 

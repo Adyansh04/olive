@@ -50,7 +50,7 @@ public:
      * @param[in,out] pose initial guess in, optimized pose out
      * @return true when the optimization produced a usable pose
      */
-    bool align(const FeatureClouds& features, MatcherPose& pose);
+    [[nodiscard]] bool align(const FeatureClouds& features, MatcherPose& pose);
 
     /// True when the last align() hit a degenerate geometry direction
     bool isDegenerate() const { return is_degenerate_; }

@@ -51,8 +51,11 @@ bool MarkerGate::push(
     if (++track_streak_[tracking_id] < config_.min_track_frames)
         return false;
 
-    accepted_.push_back(
-        { stamp, id_valid ? whycode_id : -1, landmark_key_id, id_valid, position_in_camera });
+    accepted_.push_back({ .stamp              = stamp,
+                          .marker_id          = id_valid ? whycode_id : -1,
+                          .landmark_key_id    = landmark_key_id,
+                          .decoded            = id_valid,
+                          .position_in_camera = position_in_camera });
     const double cutoff = stamp - config_.history;
     while (!accepted_.empty() && accepted_.front().stamp < cutoff)
         accepted_.pop_front();

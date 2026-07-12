@@ -1,9 +1,9 @@
 #include "olive/fusion/graph/keyframe_map.hpp"
 
+#include <pcl/common/transforms.h>
+
 #include <algorithm>
 #include <cmath>
-
-#include <pcl/common/transforms.h>
 
 namespace olive
 {
@@ -28,7 +28,12 @@ void KeyframeMap::add(
     double              stamp,
     bool                low_quality)
 {
-    keyframes_.push_back({ pose, edge, planar, stamp, stamp, low_quality });
+    keyframes_.push_back({ .pose          = pose,
+                           .edge          = edge,
+                           .planar        = planar,
+                           .stamp         = stamp,
+                           .last_selected = stamp,
+                           .low_quality   = low_quality });
     const size_t index = keyframes_.size() - 1;
 
     CloudPoint position;
@@ -126,8 +131,9 @@ void KeyframeMap::enforceCloudBudget(double now)
         evict(index);
         --to_evict;
     }
-    std::erase_if(
-        cloud_bearing_, [this](size_t index) { return keyframes_[index].edge == nullptr; });
+    std::erase_if(cloud_bearing_, [this](size_t index) {
+        return keyframes_[index].edge == nullptr;
+    });
 }
 
 bool KeyframeMap::shouldAddKeyframe(const gtsam::Pose3& pose) const
