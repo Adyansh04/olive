@@ -13,6 +13,7 @@ KeyframeMap::KeyframeMap(const KeyframeConfig& config)
   , keyframe_positions_(new Cloud)
   , local_edge_(new Cloud)
   , local_planar_(new Cloud)
+  , filter_scratch_(new Cloud)
 {
     edge_filter_.setLeafSize(config_.edge_leaf_size, config_.edge_leaf_size, config_.edge_leaf_size);
     planar_filter_.setLeafSize(
@@ -35,6 +36,8 @@ void KeyframeMap::add(
                            .last_selected = stamp,
                            .low_quality   = low_quality });
     const size_t index = keyframes_.size() - 1;
+
+    position_tree_dirty_ = true;
 
     CloudPoint position;
     position.x         = static_cast<float>(pose.translation().x());
@@ -163,33 +166,48 @@ void KeyframeMap::buildLocalMap(
     if (keyframes_.empty())
         return;
 
-    // Spatially close keyframes...
-    std::vector<int>             indices;
-    std::vector<float>           sq_distances;
-    pcl::KdTreeFLANN<CloudPoint> position_tree;
-    position_tree.setInputCloud(keyframe_positions_);
+    // Spatially close keyframes (kd-tree rebuilt only after add/updatePose).
+    if (position_tree_dirty_)
+    {
+        position_tree_.setInputCloud(keyframe_positions_);
+        position_tree_dirty_ = false;
+    }
 
     CloudPoint query;
     query.x = static_cast<float>(position.x());
     query.y = static_cast<float>(position.y());
     query.z = static_cast<float>(position.z());
-    position_tree.radiusSearch(query, config_.search_radius, indices, sq_distances);
+    position_tree_.radiusSearch(query, config_.search_radius, radius_indices_, radius_sq_distances_);
 
-    std::vector<char> selected(keyframes_.size(), 0);
-    for (const int index : indices)
-        selected[static_cast<size_t>(index)] = 1;
+    selected_.assign(keyframes_.size(), 0);
+    for (const int index : radius_indices_)
+        selected_[static_cast<size_t>(index)] = 1;
 
     // ... plus everything recent, so tight turns keep dense support.
     for (size_t i = keyframes_.size(); i > 0; --i)
     {
         if (current_time - keyframes_[i - 1].stamp > config_.recent_window)
             break;
-        selected[i - 1] = 1;
+        selected_[i - 1] = 1;
     }
+
+    // Reserve the exact concat size (transform preserves point counts).
+    size_t edge_total   = 0;
+    size_t planar_total = 0;
+    for (size_t i = 0; i < keyframes_.size(); ++i)
+    {
+        if (selected_[i] != 0 && keyframes_[i].edge)
+        {
+            edge_total += keyframes_[i].edge->size();
+            planar_total += keyframes_[i].planar->size();
+        }
+    }
+    local_edge_->reserve(edge_total);
+    local_planar_->reserve(planar_total);
 
     for (size_t i = 0; i < keyframes_.size(); ++i)
     {
-        if (selected[i] == 0)
+        if (selected_[i] == 0)
             continue;
         if (!keyframes_[i].edge)
             continue;  // clouds evicted; pose-only keyframe
@@ -210,16 +228,17 @@ void KeyframeMap::buildLocalMap(
         *local_planar_ += *cached->second.second;
     }
 
-    // Downsample in place to bound matching cost.
-    Cloud::Ptr filtered(new Cloud);
+    // Downsample in place to bound matching cost (filter output reuses the
+    // persistent scratch cloud; swap keeps both buffers alive across calls).
+    filter_scratch_->clear();
     edge_filter_.setInputCloud(local_edge_);
-    edge_filter_.filter(*filtered);
-    local_edge_.swap(filtered);
+    edge_filter_.filter(*filter_scratch_);
+    local_edge_.swap(filter_scratch_);
 
-    filtered.reset(new Cloud);
+    filter_scratch_->clear();
     planar_filter_.setInputCloud(local_planar_);
-    planar_filter_.filter(*filtered);
-    local_planar_.swap(filtered);
+    planar_filter_.filter(*filter_scratch_);
+    local_planar_.swap(filter_scratch_);
 
     edge_map   = local_edge_;
     planar_map = local_planar_;
@@ -230,6 +249,7 @@ void KeyframeMap::updatePose(size_t index, const gtsam::Pose3& pose)
     if (index >= keyframes_.size())
         return;
     keyframes_[index].pose = pose;
+    position_tree_dirty_   = true;
 
     CloudPoint& position = keyframe_positions_->points[index];
     position.x           = static_cast<float>(pose.translation().x());

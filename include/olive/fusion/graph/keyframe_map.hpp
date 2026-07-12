@@ -27,8 +27,8 @@ struct Keyframe
     Cloud::Ptr   edge;    ///< null after cloud eviction (pose is kept)
     Cloud::Ptr   planar;  ///< null after cloud eviction
     double       stamp         = 0.0;
-    double       last_selected = 0.0;   ///< last time buildLocalMap used it
-    bool         low_quality   = false; ///< degenerate/coasted; never claims a voxel
+    double       last_selected = 0.0;    ///< last time buildLocalMap used it
+    bool         low_quality   = false;  ///< degenerate/coasted; never claims a voxel
 };
 
 /**
@@ -104,15 +104,15 @@ public:
 private:
     KeyframeConfig config_;
 
-    void enforceCloudBudget(double now);
+    void    enforceCloudBudget(double now);
     int64_t voxelKey(const gtsam::Point3& position) const;
 
     std::vector<Keyframe> keyframes_;
     Cloud::Ptr            keyframe_positions_;  ///< For the radius search
 
-    std::unordered_map<int64_t, size_t> voxel_owner_;   ///< cell -> keyframe index
-    std::unordered_map<size_t, int64_t> claimed_key_;   ///< keyframe -> cell it claimed
-    std::vector<size_t>                 cloud_bearing_; ///< indices still holding clouds
+    std::unordered_map<int64_t, size_t> voxel_owner_;    ///< cell -> keyframe index
+    std::unordered_map<size_t, int64_t> claimed_key_;    ///< keyframe -> cell it claimed
+    std::vector<size_t>                 cloud_bearing_;  ///< indices still holding clouds
 
     // index -> feature clouds already transformed into the map frame
     std::unordered_map<size_t, std::pair<Cloud::Ptr, Cloud::Ptr>> transformed_cache_;
@@ -121,6 +121,21 @@ private:
     Cloud::Ptr                 local_planar_;
     pcl::VoxelGrid<CloudPoint> edge_filter_;
     pcl::VoxelGrid<CloudPoint> planar_filter_;
+
+    // Reused buildLocalMap() scratch. Safe only because the scan pipeline is
+    // single-threaded (callbacks never re-enter) — same invariant the reused
+    // local_edge_/local_planar_ outputs already rely on.
+    std::vector<int>   radius_indices_;
+    std::vector<float> radius_sq_distances_;
+    std::vector<char>  selected_;
+    Cloud::Ptr         filter_scratch_;
+
+    // Position kd-tree is rebuilt lazily: keyframe_positions_ mutates ONLY in
+    // add() and updatePose(), each of which sets the dirty flag. A missed
+    // invalidation would silently serve stale positions — keep the flag next
+    // to every mutation site.
+    pcl::KdTreeFLANN<CloudPoint> position_tree_;
+    bool                         position_tree_dirty_ = true;
 };
 
 }  // namespace olive
