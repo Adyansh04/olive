@@ -57,24 +57,76 @@ scripts/              bringup/ · evaluation/ · fault_injection/  (see scripts/
 benchmark/            full-stack replay + micro benchmarks, per-change results log
 ```
 
-## Build & run
+## Build
 
 ```zsh
 source /opt/ros/jazzy/setup.zsh
 cd ~/olive_ws
 colcon build --symlink-install --packages-select olive
-source install/setup.zsh
-
-# simulation (separate terminal): ros2 launch olive_sim simulation.launch.py world_name:=maze headless:=true
-ros2 launch olive sensor_fusion.launch.py
+source install/setup.zsh          # source after every build
 ```
 
-This default build uses the stock apt GTSAM/PCL and works everywhere. For the
+The default build uses the stock apt GTSAM/PCL and works everywhere. For the
 optimized build — source-built GTSAM + PCL 1.15 with AVX2 and the ~2× faster
 nanoflann scan-matcher search — see [BUILDING.md](BUILDING.md); per-change
-measurements live in [benchmark/RESULTS.md](benchmark/RESULTS.md).
+measurements are in [benchmark/RESULTS.md](benchmark/RESULTS.md).
 
-The launch reads `config/fusion.yaml`, starts only the enabled modalities, and passes each node its parameter section. `whycode_vision` needs the [Simd](https://github.com/ermig1979/Simd) library (build to a prefix and pass `-DSIMD_INCLUDE_DIR`/`-DSIMD_LIBRARY` if it is not in `/usr/local`).
+`whycode_vision` (the marker detector) needs the [Simd](https://github.com/ermig1979/Simd)
+library — build it to a prefix and pass `-DSIMD_INCLUDE_DIR`/`-DSIMD_LIBRARY` if
+it is not in `/usr/local`.
+
+## Run
+
+**Fastest path — one command brings up sim + fusion in the maze and drives a
+test loop.** `bringup_test.sh` kills stragglers, launches exactly one sim + one
+stack, verifies the process counts, then runs the chosen test:
+
+```zsh
+# ros2 run olive bringup_test.sh [world] [test] [rviz]
+#   world: maze | fusion_test | warehouse | office | industrial
+#   test:  none | drive | drive-long | ate | marker | smooth
+ros2 run olive bringup_test.sh maze drive
+ros2 run olive bringup_test.sh maze none rviz   # bring up + RViz debug view, no test
+```
+
+**Or run the pieces yourself, one per terminal:**
+
+```zsh
+# 1. Simulation (Gazebo Harmonic). headless:=true = no GUI; drop it to watch.
+ros2 launch olive_sim simulation.launch.py world_name:=maze headless:=true
+
+# 2. Fusion stack — reads config/fusion.yaml, starts only the modalities enabled
+#    under `modalities:`, and hands each node its parameter section.
+#    rviz:=true opens the debug view; config_file:=<path> overrides fusion.yaml.
+ros2 launch olive sensor_fusion.launch.py rviz:=true
+
+# 3. Drive a repeatable closed-loop square (chases corners via /ground_truth)
+ros2 run olive square_drive.py --half 7.0 --loops 3 --speed 0.4
+```
+
+Fused output appears on `/olive/odometry` (map frame) and `/olive/odometry_local`
+(smooth odom frame); debug streams are under `/olive/debug/*` (off by default —
+enable in `config/fusion.yaml`).
+
+**Record once, replay offline** — the cheap iteration loop, and what the
+benchmarks use. Capture the raw sensor streams with the sim running, then replay
+them through the stack with no simulator (faster and deterministic):
+
+```zsh
+# record raw inputs while a drive runs (sim + fusion up)
+ros2 bag record -o my_run /lidar/points /imu/data /odom /camera/image_raw \
+                          /camera/camera_info /tf /tf_static /clock /ground_truth
+
+# later: start the fusion stack, then replay the inputs into it
+ros2 bag play my_run --clock
+
+# evaluate any recorded run offline — ATE, smooth-stream continuity, VO health
+ros2 run olive analyze_bag.py my_run --max-step 0.05
+```
+
+More validation, calibration, and fault-injection tools are documented in
+[`scripts/README.md`](scripts/README.md); the fixed CPU benchmark is in
+[`benchmark/README.md`](benchmark/README.md).
 
 ## Configuration
 
