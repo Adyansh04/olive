@@ -23,15 +23,9 @@ namespace olive
  */
 struct Pose3D
 {
-    Eigen::Vector3d    position;     ///< 3D position (x, y, z)
-    Eigen::Quaterniond orientation;  ///< Orientation as a quaternion (w, x, y, z)
-    double             timestamp;    ///< Timestamp in seconds
-
-    Pose3D()
-      : position(Eigen::Vector3d::Zero())
-      , orientation(Eigen::Quaterniond::Identity())
-      , timestamp(0.0)
-    {}
+    Eigen::Vector3d    position    = Eigen::Vector3d::Zero();         ///< 3D position (x, y, z)
+    Eigen::Quaterniond orientation = Eigen::Quaterniond::Identity();  ///< Orientation (w, x, y, z)
+    double             timestamp   = 0.0;                             ///< Timestamp in seconds
 };
 
 /**
@@ -39,15 +33,9 @@ struct Pose3D
  */
 struct Velocity3D
 {
-    Eigen::Vector3d linear;     ///< Linear velocity (vx, vy, vz)
-    Eigen::Vector3d angular;    ///< Angular velocity (wx, wy, wz)
-    double          timestamp;  ///< Timestamp in seconds
-
-    Velocity3D()
-      : linear(Eigen::Vector3d::Zero())
-      , angular(Eigen::Vector3d::Zero())
-      , timestamp(0.0)
-    {}
+    Eigen::Vector3d linear    = Eigen::Vector3d::Zero();  ///< Linear velocity (vx, vy, vz)
+    Eigen::Vector3d angular   = Eigen::Vector3d::Zero();  ///< Angular velocity (wx, wy, wz)
+    double          timestamp = 0.0;                      ///< Timestamp in seconds
 };
 
 /**
@@ -55,15 +43,9 @@ struct Velocity3D
  */
 struct ImuData
 {
-    Eigen::Vector3d linear_acceleration;  ///< Linear acceleration (ax, ay, az)
-    Eigen::Vector3d angular_velocity;     ///< Angular velocity (wx, wy, wz)
-    double          timestamp;            ///< Timestamp in seconds
-
-    ImuData()
-      : linear_acceleration(Eigen::Vector3d::Zero())
-      , angular_velocity(Eigen::Vector3d::Zero())
-      , timestamp(0.0)
-    {}
+    Eigen::Vector3d linear_acceleration = Eigen::Vector3d::Zero();  ///< Linear accel (ax, ay, az)
+    Eigen::Vector3d angular_velocity    = Eigen::Vector3d::Zero();  ///< Angular vel (wx, wy, wz)
+    double          timestamp           = 0.0;                      ///< Timestamp in seconds
 };
 
 /**
@@ -71,15 +53,9 @@ struct ImuData
  */
 struct WheelData
 {
-    double left_ticks;   ///< Left wheel encoder ticks
-    double right_ticks;  ///< Right wheel encoder ticks
-    double timestamp;    ///< Timestamp in seconds
-
-    WheelData()
-      : left_ticks(0.0)
-      , right_ticks(0.0)
-      , timestamp(0.0)
-    {}
+    double left_ticks  = 0.0;  ///< Left wheel encoder ticks
+    double right_ticks = 0.0;  ///< Right wheel encoder ticks
+    double timestamp   = 0.0;  ///< Timestamp in seconds
 };
 
 /**
@@ -87,21 +63,13 @@ struct WheelData
  */
 struct OdometryMeasurement
 {
-    Pose3D                      pose;             ///< Estimated pose
-    Velocity3D                  velocity;         ///< Estimated velocity
-    Eigen::Matrix<double, 6, 6> pose_covariance;  ///< Pose covariance (6x6)
-    double                      timestamp;        ///< Timestamp in seconds
-    std::string                 frame_id;         ///< Reference frame
-    std::string                 child_frame_id;   ///< Child frame
-
-    OdometryMeasurement()
-      : pose()
-      , velocity()
-      , pose_covariance(Eigen::Matrix<double, 6, 6>::Identity())
-      , timestamp(0.0)
-      , frame_id("map")
-      , child_frame_id("base_link")
-    {}
+    Pose3D                      pose;      ///< Estimated pose
+    Velocity3D                  velocity;  ///< Estimated velocity
+    Eigen::Matrix<double, 6, 6> pose_covariance =
+        Eigen::Matrix<double, 6, 6>::Identity();  ///< Pose covariance (6x6)
+    double      timestamp      = 0.0;             ///< Timestamp in seconds
+    std::string frame_id       = "map";           ///< Reference frame
+    std::string child_frame_id = "base_link";     ///< Child frame
 };
 
 /**
@@ -109,19 +77,12 @@ struct OdometryMeasurement
  */
 struct MarkerDetection
 {
-    int                         marker_id;          ///< Unique marker ID
+    int                         marker_id = -1;     ///< Unique marker ID
     Pose3D                      pose_camera_frame;  ///< Pose in camera frame
-    Eigen::Matrix<double, 6, 6> covariance;         ///< Measurement covariance
-    double                      confidence;         ///< Detection confidence [0, 1]
-    double                      timestamp;          ///< Timestamp in seconds
-
-    MarkerDetection()
-      : marker_id(-1)
-      , pose_camera_frame()
-      , covariance(Eigen::Matrix<double, 6, 6>::Identity())
-      , confidence(0.0)
-      , timestamp(0.0)
-    {}
+    Eigen::Matrix<double, 6, 6> covariance =
+        Eigen::Matrix<double, 6, 6>::Identity();  ///< Measurement covariance
+    double confidence = 0.0;                      ///< Detection confidence [0, 1]
+    double timestamp  = 0.0;                      ///< Timestamp in seconds
 };
 
 /**

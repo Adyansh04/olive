@@ -63,10 +63,10 @@ private:
     void loadConfiguration();
 
     // Hot path: one full pipeline pass per scan
-    void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
-    void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg);
-    void wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
-    void markerCallback(const whycode_vision::msg::WhyCodePoseArray::SharedPtr msg);
+    void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr& msg);
+    void imuCallback(const sensor_msgs::msg::Imu::SharedPtr& msg);
+    void wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr& msg);
+    void markerCallback(const whycode_vision::msg::WhyCodePoseArray::SharedPtr& msg);
 
     void         bootstrapFirstKeyframe(const FeatureClouds& features);
     gtsam::Pose3 predictPose(double scan_stamp) const;

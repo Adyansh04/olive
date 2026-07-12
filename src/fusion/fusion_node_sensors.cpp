@@ -10,7 +10,7 @@
 namespace olive
 {
 
-void FusionNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
+void FusionNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr& msg)
 {
     ImuData sample;
     sample.timestamp = static_cast<double>(msg->header.stamp.sec) +
@@ -181,7 +181,7 @@ void FusionNode::reestimateGyroBias()
     imu_buffer_.setGyroBias(updated);
 }
 
-void FusionNode::wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
+void FusionNode::wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr& msg)
 {
     const double stamp = static_cast<double>(msg->header.stamp.sec) +
                          1e-9 * msg->header.stamp.nanosec + wheel_time_offset_;
@@ -194,7 +194,7 @@ void FusionNode::wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
     last_wheel_twist_ = msg->twist.twist;
 }
 
-void FusionNode::markerCallback(const whycode_vision::msg::WhyCodePoseArray::SharedPtr msg)
+void FusionNode::markerCallback(const whycode_vision::msg::WhyCodePoseArray::SharedPtr& msg)
 {
     const double stamp = static_cast<double>(msg->header.stamp.sec) +
                          1e-9 * msg->header.stamp.nanosec + camera_time_offset_;

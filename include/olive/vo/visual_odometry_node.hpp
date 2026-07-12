@@ -43,9 +43,9 @@ public:
     CallbackReturn on_cleanup(const rclcpp_lifecycle::State& state) override;
 
 private:
-    void imageCallback(const sensor_msgs::msg::Image::SharedPtr msg);
-    void cameraInfoCallback(const sensor_msgs::msg::CameraInfo::SharedPtr msg);
-    void wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
+    void imageCallback(const sensor_msgs::msg::Image::SharedPtr& msg);
+    void cameraInfoCallback(const sensor_msgs::msg::CameraInfo::SharedPtr& msg);
+    void wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr& msg);
 
     /// Wheel-measured planar displacement between two times, if covered
     std::optional<double> wheelDistance(double t0, double t1) const;

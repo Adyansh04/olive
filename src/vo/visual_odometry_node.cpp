@@ -104,7 +104,7 @@ VisualOdometryNode::CallbackReturn VisualOdometryNode::on_cleanup(const rclcpp_l
     return CallbackReturn::SUCCESS;
 }
 
-void VisualOdometryNode::cameraInfoCallback(const sensor_msgs::msg::CameraInfo::SharedPtr msg)
+void VisualOdometryNode::cameraInfoCallback(const sensor_msgs::msg::CameraInfo::SharedPtr& msg)
 {
     focal_           = msg->k[0];
     principal_point_ = { msg->k[2], msg->k[5] };
@@ -112,7 +112,7 @@ void VisualOdometryNode::cameraInfoCallback(const sensor_msgs::msg::CameraInfo::
     camera_info_sub_.reset();  // intrinsics are static in this system
 }
 
-void VisualOdometryNode::wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
+void VisualOdometryNode::wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr& msg)
 {
     const double stamp =
         static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec;
@@ -153,7 +153,7 @@ void VisualOdometryNode::adoptKeyframe(const cv::Mat& gray, double stamp)
     keyframe_stamp_ = stamp;
 }
 
-void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
+void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr& msg)
 {
     if (!have_intrinsics_)
         return;

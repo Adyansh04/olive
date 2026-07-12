@@ -78,7 +78,7 @@ gtsam::Pose3 FusionNode::predictPose(double scan_stamp) const
     return last_scan_pose_ * increment;
 }
 
-void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr& msg)
 {
     const auto pipeline_start = std::chrono::steady_clock::now();
 
