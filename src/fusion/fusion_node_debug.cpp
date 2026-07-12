@@ -129,7 +129,7 @@ void FusionNode::publishFiducialDebug(double stamp)
     const rclcpp::Time ros_stamp(static_cast<int64_t>(stamp * 1e9));
 
     visualization_msgs::msg::MarkerArray array;
-    for (const auto& [id, position] : known_markers_)
+    for (const auto& [id, position] : marker_.known)
     {
         const auto event  = anchor_event_times_.find(id);
         const bool seen   = event != anchor_event_times_.end();
@@ -201,7 +201,7 @@ void FusionNode::publishFiducialDebug(double stamp)
     // Landmark estimates (landmark mode): orange spheres at the optimized
     // positions; surveyed ids get an error segment to their survey, free
     // landmarks a "(free)" label. Convergence is visible live.
-    if (marker_landmark_mode_ && pose_graph_)
+    if (marker_.landmark_mode && pose_graph_)
     {
         for (const auto& [id, estimate] : pose_graph_->landmarks())
         {
@@ -225,8 +225,8 @@ void FusionNode::publishFiducialDebug(double stamp)
 
             const bool undecoded = id >= UNDECODED_LANDMARK_BASE;
             const auto survey =
-                undecoded ? known_markers_.end() : known_markers_.find(static_cast<int>(id));
-            if (survey != known_markers_.end())
+                undecoded ? marker_.known.end() : marker_.known.find(static_cast<int>(id));
+            if (survey != marker_.known.end())
             {
                 visualization_msgs::msg::Marker error_line = sphere;
                 error_line.ns                              = "landmark_error";

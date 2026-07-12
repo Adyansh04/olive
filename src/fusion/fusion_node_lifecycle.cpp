@@ -263,18 +263,18 @@ void FusionNode::loadConfiguration()
     vo_buffer_.setInterpolationSlack(get_parameter("vo_buffer_slack_s").as_double());
 
     use_markers_  = get_parameter("use_markers").as_bool();
-    marker_topic_ = get_parameter("marker_topic").as_string();
+    marker_.topic = get_parameter("marker_topic").as_string();
 
-    const auto cam_t   = get_parameter("camera_translation").as_double_array();
-    const auto cam_rpy = get_parameter("camera_rpy").as_double_array();
-    base_from_camera_  = gtsam::Pose3(
+    const auto cam_t         = get_parameter("camera_translation").as_double_array();
+    const auto cam_rpy       = get_parameter("camera_rpy").as_double_array();
+    marker_.base_from_camera = gtsam::Pose3(
         gtsam::Rot3::Ypr(cam_rpy[2], cam_rpy[1], cam_rpy[0]),
         gtsam::Point3(cam_t[0], cam_t[1], cam_t[2]));
 
-    marker_sigma_m_        = get_parameter("marker_position_sigma_m").as_double();
-    marker_stamp_window_   = get_parameter("marker_stamp_window_s").as_double();
-    marker_landmark_mode_  = get_parameter("marker_mode").as_string() != "anchor";
-    marker_survey_sigma_m_ = get_parameter("marker_survey_sigma_m").as_double();
+    marker_.sigma_m        = get_parameter("marker_position_sigma_m").as_double();
+    marker_.stamp_window_s = get_parameter("marker_stamp_window_s").as_double();
+    marker_.landmark_mode  = get_parameter("marker_mode").as_string() != "anchor";
+    marker_.survey_sigma_m = get_parameter("marker_survey_sigma_m").as_double();
 
     MarkerGateConfig gate_config;
     gate_config.min_range = get_parameter("marker_min_range_m").as_double();
@@ -284,11 +284,11 @@ void FusionNode::loadConfiguration()
     // Free landmarks (unsurveyed / undecoded) only exist in landmark mode;
     // the legacy anchor path can only consume surveyed ids.
     gate_config.accept_unknown_ids =
-        marker_landmark_mode_ && get_parameter("marker_accept_unknown_ids").as_bool();
+        marker_.landmark_mode && get_parameter("marker_accept_unknown_ids").as_bool();
     gate_config.accept_undecoded_ids =
-        marker_landmark_mode_ && get_parameter("marker_accept_undecoded_ids").as_bool();
+        marker_.landmark_mode && get_parameter("marker_accept_undecoded_ids").as_bool();
 
-    known_markers_.clear();
+    marker_.known.clear();
     // Free landmarks initialized before the first survey anchor would lock in
     // the spawn-frame gauge and then fight the anchor snap (a gauge conflict
     // that can fold the map). They are held back until the trajectory is
@@ -300,12 +300,12 @@ void FusionNode::loadConfiguration()
     for (size_t i = 0; i < ids.size() && i * 3 + 2 < positions.size(); ++i)
     {
         const int id = static_cast<int>(ids[i]);
-        known_markers_.emplace(
+        marker_.known.emplace(
             id,
             gtsam::Point3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]));
         gate_config.known_ids.insert(id);
     }
-    if (known_markers_.empty())
+    if (marker_.known.empty())
         world_anchored_ = true;  // no surveys: the spawn gauge is the gauge
     marker_gate_ = std::make_unique<MarkerGate>(gate_config);
 
@@ -327,11 +327,11 @@ void FusionNode::loadConfiguration()
         Eigen::AngleAxisd(imu_rpy[1], Eigen::Vector3d::UnitY()) *
         Eigen::AngleAxisd(imu_rpy[0], Eigen::Vector3d::UnitX())));
 
-    imu_init_duration_s_     = get_parameter("imu_init_duration_s").as_double();
-    imu_init_max_wait_s_     = get_parameter("imu_init_max_wait_s").as_double();
-    stationary_gyro_thresh_  = get_parameter("stationary_gyro_thresh_rad_s").as_double();
-    stationary_wheel_thresh_ = get_parameter("stationary_wheel_thresh_m").as_double();
-    gyro_bias_reestimate_    = get_parameter("gyro_bias_reestimate").as_bool();
+    imu_init_.duration_s   = get_parameter("imu_init_duration_s").as_double();
+    imu_init_.max_wait_s   = get_parameter("imu_init_max_wait_s").as_double();
+    imu_init_.gyro_thresh  = get_parameter("stationary_gyro_thresh_rad_s").as_double();
+    imu_init_.wheel_thresh = get_parameter("stationary_wheel_thresh_m").as_double();
+    gyro_bias_reestimate_  = get_parameter("gyro_bias_reestimate").as_bool();
 
     imu_preintegration_      = get_parameter("imu_preintegration").as_bool();
     imu_preint_max_interval_ = get_parameter("imu_preint_max_interval_s").as_double();
@@ -364,8 +364,8 @@ void FusionNode::loadConfiguration()
     wheel_time_offset_  = get_parameter("wheel_time_offset_s").as_double();
     camera_time_offset_ = get_parameter("camera_time_offset_s").as_double();
     wheel_buffer_.setInterpolationSlack(get_parameter("wheel_interp_slack_s").as_double());
-    marker_max_yaw_rate_ = get_parameter("marker_max_yaw_rate_rad_s").as_double();
-    marker_max_speed_    = get_parameter("marker_max_speed_m_s").as_double();
+    marker_.max_yaw_rate = get_parameter("marker_max_yaw_rate_rad_s").as_double();
+    marker_.max_speed    = get_parameter("marker_max_speed_m_s").as_double();
     latency_logged_.clear();
 
     preprocessor_config_.min_range = static_cast<float>(get_parameter("min_range").as_double());
@@ -472,9 +472,9 @@ FusionNode::CallbackReturn FusionNode::on_configure(const rclcpp_lifecycle::Stat
     last_wheel_twist_ = geometry_msgs::msg::Twist();
     tf_batch_.reserve(2);
 
-    imu_init_done_         = false;
-    imu_init_window_start_ = -1.0;
-    imu_init_first_stamp_  = -1.0;
+    imu_init_.done         = false;
+    imu_init_.window_start = -1.0;
+    imu_init_.first_stamp  = -1.0;
     first_scan_stamp_      = -1.0;
 
     odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(odom_topic_, rclcpp::QoS(10));
@@ -563,7 +563,7 @@ FusionNode::CallbackReturn FusionNode::on_activate(const rclcpp_lifecycle::State
     if (use_markers_)
     {
         marker_sub_ = create_subscription<whycode_vision::msg::WhyCodePoseArray>(
-            marker_topic_,
+            marker_.topic,
             rclcpp::QoS(10),
             [this](whycode_vision::msg::WhyCodePoseArray::SharedPtr msg) { markerCallback(msg); });
     }
@@ -685,7 +685,7 @@ void FusionNode::loadExtrinsicsFromTf()
 
     const Eigen::Isometry3d base_from_cam = tf2::transformToEigen(
         buffer.lookupTransform(base_frame_, camera_frame, tf2::TimePointZero));
-    base_from_camera_ = gtsam::Pose3(
+    marker_.base_from_camera = gtsam::Pose3(
         gtsam::Rot3(base_from_cam.rotation()),
         gtsam::Point3(base_from_cam.translation()));
 

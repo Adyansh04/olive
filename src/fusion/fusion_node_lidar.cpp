@@ -93,19 +93,19 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
 
     // Hold scans until the IMU bias window resolves; a robot without an IMU
     // still starts once the grace period passes.
-    if (!imu_init_done_)
+    if (!imu_init_.done)
     {
         const double stamp =
             static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec;
         if (first_scan_stamp_ < 0.0)
             first_scan_stamp_ = stamp;
-        if (!imu_buffer_.hasData() && stamp - first_scan_stamp_ > imu_init_max_wait_s_)
+        if (!imu_buffer_.hasData() && stamp - first_scan_stamp_ > imu_init_.max_wait_s)
         {
             RCLCPP_WARN(
                 get_logger(),
                 "No IMU data after %.1f s - running without gyro",
-                imu_init_max_wait_s_);
-            imu_init_done_ = true;
+                imu_init_.max_wait_s);
+            imu_init_.done = true;
         }
         else
         {
@@ -346,17 +346,17 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
         if (use_markers_)
         {
             for (const MarkerObservation& obs :
-                 marker_gate_->collectNear(features_.stamp, marker_stamp_window_))
+                 marker_gate_->collectNear(features_.stamp, marker_.stamp_window_s))
             {
-                if (marker_landmark_mode_)
+                if (marker_.landmark_mode)
                 {
                     // TagSLAM-style: the marker is a landmark variable.
                     // Surveyed ids carry a world prior (anchoring); everything
                     // else is a free landmark whose repeated sightings act as
                     // an odometry constraint.
                     const auto survey =
-                        obs.decoded ? known_markers_.find(obs.marker_id) : known_markers_.end();
-                    const bool surveyed = survey != known_markers_.end();
+                        obs.decoded ? marker_.known.find(obs.marker_id) : marker_.known.end();
+                    const bool surveyed = survey != marker_.known.end();
                     // Gauge guard: a free landmark initialized before the
                     // first survey anchor encodes the spawn frame and later
                     // fights the anchor snap — hold free landmarks back until
@@ -367,18 +367,18 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
                     pose_graph_->addMarkerObservation(
                         obs.landmark_key_id,
                         obs.position_in_camera,
-                        base_from_camera_,
-                        marker_sigma_m_,
+                        marker_.base_from_camera,
+                        marker_.sigma_m,
                         surveyed ? std::optional<gtsam::Point3>(survey->second) : std::nullopt,
-                        marker_survey_sigma_m_);
+                        marker_.survey_sigma_m);
                 }
                 else
                 {
                     pose_graph_->addMarkerAnchor(
                         obs.position_in_camera,
-                        known_markers_.at(obs.marker_id),
-                        base_from_camera_,
-                        marker_sigma_m_);
+                        marker_.known.at(obs.marker_id),
+                        marker_.base_from_camera,
+                        marker_.sigma_m);
                 }
                 anchor_event_times_[obs.landmark_key_id] = features_.stamp;
                 ++anchors;

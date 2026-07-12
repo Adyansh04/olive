@@ -127,14 +127,22 @@ private:
     FactorSigmas vo_between_sigmas_{};
     std::size_t  vo_factors_added_   = 0;  ///< VO betweens that landed
     std::size_t  vo_factors_skipped_ = 0;  ///< VO betweens dropped (coverage)
-    std::string  marker_topic_;
-    gtsam::Pose3 base_from_camera_;
-    double       marker_sigma_m_        = 0.10;
-    double       marker_stamp_window_   = 0.25;
-    bool         marker_landmark_mode_  = true;
-    double       marker_survey_sigma_m_ = 0.05;
-    bool         world_anchored_        = false;
-    std::unordered_map<int, gtsam::Point3> known_markers_;
+    bool         world_anchored_     = false;
+
+    // Marker subsystem: config + survey table, loaded once in loadConfiguration
+    struct MarkerSettings
+    {
+        std::string                            topic;
+        gtsam::Pose3                           base_from_camera;
+        double                                 sigma_m        = 0.10;
+        double                                 stamp_window_s = 0.25;
+        bool                                   landmark_mode  = true;
+        double                                 survey_sigma_m = 0.05;
+        double                                 max_yaw_rate   = 0.6;  ///< blur guard (rad/s)
+        double                                 max_speed      = 1.0;  ///< blur guard (m/s)
+        std::unordered_map<int, gtsam::Point3> known;                 ///< surveyed world positions
+    };
+    MarkerSettings marker_;
 
     // Debug toggles (live-updatable via `ros2 param set`)
     bool                  debug_enabled_       = false;
@@ -185,27 +193,27 @@ private:
     double                                                    imu_preint_max_interval_ = 5.0;
     std::unique_ptr<gtsam::PreintegratedCombinedMeasurements> pim_;
 
-    // IMU initialization state
-    bool   imu_init_done_           = false;
-    double imu_init_window_start_   = -1.0;
-    double imu_init_first_stamp_    = -1.0;
-    double first_scan_stamp_        = -1.0;
-    double imu_init_duration_s_     = 1.5;
-    double imu_init_max_wait_s_     = 10.0;
-    double stationary_gyro_thresh_  = 0.02;
-    double stationary_wheel_thresh_ = 0.005;
-    bool   gyro_bias_reestimate_    = false;
-    bool   deskew_enabled_          = true;
-    int    deskew_time_bins_        = 32;
+    // Stationary IMU-init window (state + thresholds; gates the first scan)
+    struct ImuInit
+    {
+        bool   done         = false;
+        double window_start = -1.0;
+        double first_stamp  = -1.0;
+        double duration_s   = 1.5;
+        double max_wait_s   = 10.0;
+        double gyro_thresh  = 0.02;   ///< stationary gyro |w| (rad/s)
+        double wheel_thresh = 0.005;  ///< stationary wheel speed (m/s)
+    };
+    ImuInit imu_init_;
+    double  first_scan_stamp_     = -1.0;
+    bool    gyro_bias_reestimate_ = false;
+    bool    deskew_enabled_       = true;
+    int     deskew_time_bins_     = 32;
 
     // Cross-sensor time offsets (lidar is the reference; corrected = msg + offset)
     double imu_time_offset_    = 0.0;
     double wheel_time_offset_  = 0.0;
     double camera_time_offset_ = 0.0;
-
-    // Marker motion gating (camera blur guard on real hardware)
-    double marker_max_yaw_rate_ = 0.6;
-    double marker_max_speed_    = 1.0;
 
     // One-shot per-sensor latency characterization at startup
     std::unordered_map<std::string, int> latency_logged_;

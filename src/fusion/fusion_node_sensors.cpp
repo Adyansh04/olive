@@ -26,39 +26,39 @@ void FusionNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr& msg)
         msg->linear_acceleration.z);
     imu_buffer_.push(sample);
 
-    if (!imu_init_done_)
+    if (!imu_init_.done)
         handleImuInit(sample.timestamp);
 }
 
 void FusionNode::handleImuInit(double stamp)
 {
-    if (imu_init_first_stamp_ < 0.0)
-        imu_init_first_stamp_ = stamp;
-    if (imu_init_window_start_ < 0.0)
-        imu_init_window_start_ = stamp;
+    if (imu_init_.first_stamp < 0.0)
+        imu_init_.first_stamp = stamp;
+    if (imu_init_.window_start < 0.0)
+        imu_init_.window_start = stamp;
 
-    if (stamp - imu_init_window_start_ < imu_init_duration_s_)
+    if (stamp - imu_init_.window_start < imu_init_.duration_s)
     {
         // Give up rather than deadlock: a robot that starts moving immediately
         // still runs, just without a bias estimate.
-        if (stamp - imu_init_first_stamp_ > imu_init_max_wait_s_)
+        if (stamp - imu_init_.first_stamp > imu_init_.max_wait_s)
         {
             RCLCPP_WARN(
                 get_logger(),
                 "IMU init: no stationary window within %.1f s - proceeding with zero gyro bias",
-                imu_init_max_wait_s_);
-            imu_init_done_ = true;
+                imu_init_.max_wait_s);
+            imu_init_.done = true;
         }
         return;
     }
 
-    const auto stats = imu_buffer_.windowStats(imu_init_window_start_, stamp);
+    const auto stats = imu_buffer_.windowStats(imu_init_.window_start, stamp);
 
-    bool stationary = stats.count >= 10 && stats.gyro_deviation < stationary_gyro_thresh_;
+    bool stationary = stats.count >= 10 && stats.gyro_deviation < imu_init_.gyro_thresh;
     if (stationary && wheel_buffer_.hasData())
     {
-        const auto wheel_motion = wheel_buffer_.relativePose(imu_init_window_start_, stamp);
-        if (wheel_motion && wheel_motion->translation().norm() > stationary_wheel_thresh_)
+        const auto wheel_motion = wheel_buffer_.relativePose(imu_init_.window_start, stamp);
+        if (wheel_motion && wheel_motion->translation().norm() > imu_init_.wheel_thresh)
             stationary = false;
     }
 
@@ -69,12 +69,12 @@ void FusionNode::handleImuInit(double stamp)
             *get_clock(),
             3000,
             "IMU init: motion detected during bias window - restarting collection");
-        imu_init_window_start_ = stamp;
+        imu_init_.window_start = stamp;
         return;
     }
 
     imu_buffer_.setGyroBias(stats.gyro_mean);
-    imu_init_done_ = true;
+    imu_init_.done = true;
 
     // Sanity checks that catch the classic driver misconfigurations.
     const double accel_norm = stats.accel_mean.norm();
@@ -138,7 +138,7 @@ bool FusionNode::markerMotionGate(double stamp)
     // Real cameras blur under fast motion and the detector's centroid lags;
     // anchoring from such frames imprints the error into the graph.
     const double yaw_rate = std::abs(imu_buffer_.rateNear(stamp).z());
-    if (yaw_rate > marker_max_yaw_rate_)
+    if (yaw_rate > marker_.max_yaw_rate)
     {
         RCLCPP_INFO_THROTTLE(
             get_logger(),
@@ -151,7 +151,7 @@ bool FusionNode::markerMotionGate(double stamp)
     if (wheel_buffer_.hasData())
     {
         const auto delta = wheel_buffer_.relativePose(stamp - 0.2, stamp);
-        if (delta && delta->translation().norm() / 0.2 > marker_max_speed_)
+        if (delta && delta->translation().norm() / 0.2 > marker_.max_speed)
         {
             RCLCPP_INFO_THROTTLE(
                 get_logger(),
@@ -166,7 +166,7 @@ bool FusionNode::markerMotionGate(double stamp)
 
 void FusionNode::reestimateGyroBias()
 {
-    if (!imu_init_done_ || !imu_buffer_.hasData())
+    if (!imu_init_.done || !imu_buffer_.hasData())
         return;
 
     const double now = static_cast<double>(get_clock()->now().nanoseconds()) * 1e-9;
@@ -176,11 +176,11 @@ void FusionNode::reestimateGyroBias()
     if (wheel_buffer_.hasData())
     {
         const auto wheel_motion = wheel_buffer_.relativePose(t0, now);
-        if (!wheel_motion || wheel_motion->translation().norm() > stationary_wheel_thresh_)
+        if (!wheel_motion || wheel_motion->translation().norm() > imu_init_.wheel_thresh)
             return;
     }
     const auto stats = imu_buffer_.windowStats(t0, now);
-    if (stats.count < 10 || stats.gyro_deviation > stationary_gyro_thresh_)
+    if (stats.count < 10 || stats.gyro_deviation > imu_init_.gyro_thresh)
         return;
 
     // Slow exponential update: tracks temperature drift without ever jumping.
