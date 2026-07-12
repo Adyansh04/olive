@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cv_bridge/cv_bridge.hpp>
 #include <opencv2/calib3d.hpp>
+#include <opencv2/core/utility.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/video/tracking.hpp>
 
@@ -56,6 +57,12 @@ VisualOdometryNode::CallbackReturn VisualOdometryNode::on_configure(const rclcpp
     pose_x_ = pose_y_ = pose_yaw_ = 0.0;
     keyframe_stamp_               = -1.0;
     have_intrinsics_              = false;
+
+    // Sparse 640x480 VO gains nothing from OpenCV's thread pool, and its TBB
+    // workers busy-spin between frames — measured wasting ~a core. Single-
+    // thread the ops (goodFeaturesToTrack / PyrLK are per-point independent,
+    // so the output is unchanged).
+    cv::setNumThreads(1);
 
     odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(odom_topic_, rclcpp::QoS(10));
     odom_msg_.header.frame_id = odom_frame_;
