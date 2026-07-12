@@ -16,6 +16,8 @@ hybrid-safe); peak RSS; ATE RMSE + local-stream max step from
 | id | commit | change | fusion CPU-s | vo CPU-s | whycon CPU-s | total | ATE RMSE | max step | notes |
 |----|--------|--------|-------------:|---------:|-------------:|------:|---------:|---------:|-------|
 | B0 | 99dd54c | baseline, `-O2` no `-march` (pre-existing build) | 23.0 | 19.3 | 3.7 | 46.0 | 0.080 | 0.043 | wall 205.8 s; RSS 90/91/100 M; VO ratio 0.96; anchor at 45.6 s. Reference guardrails for the whole series. |
+| B1 | 62c61bb | `-O3` + LTO default (**working baseline** from here) | 23.3 | 19.4 | 3.9 | 46.6 | 0.072 | 0.039 | **No measurable CPU win** (within noise vs B0) — hot cycles sit in prebuilt PCL `.so`s our flags don't recompile. Kept: free (43 s clean build), LTO re-inlines across the 5-TU split, standard practice. ATE delta vs B0 is run-to-run estimator noise. |
+| — | cc66a73 | `-march=x86-64-v3` **tried and rejected** | — | — | — | — | — | — | AVX2/FMA TUs corrupt the heap at the prebuilt (SSE2-ABI) GTSAM boundary: every gtsam-linked unit test dies with `double free or corruption`; `EIGEN_MAX_ALIGN_BYTES=16` pin does NOT fix it. Would require rebuilding GTSAM (+PCL) from source with matching flags — out of scope. Negative result documented in CMakeLists + MODERNIZATION_PLAN §8. |
 
 ## Micro-benchmarks
 
