@@ -68,6 +68,11 @@ source install/setup.zsh
 ros2 launch olive sensor_fusion.launch.py
 ```
 
+This default build uses the stock apt GTSAM/PCL and works everywhere. For the
+optimized build — source-built GTSAM + PCL 1.15 with AVX2 and the ~2× faster
+nanoflann scan-matcher search — see [BUILDING.md](BUILDING.md); per-change
+measurements live in [benchmark/RESULTS.md](benchmark/RESULTS.md).
+
 The launch reads `config/fusion.yaml`, starts only the enabled modalities, and passes each node its parameter section. `whycode_vision` needs the [Simd](https://github.com/ermig1979/Simd) library (build to a prefix and pass `-DSIMD_INCLUDE_DIR`/`-DSIMD_LIBRARY` if it is not in `/usr/local`).
 
 ## Configuration

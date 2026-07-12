@@ -33,6 +33,10 @@ hybrid-safe); peak RSS; ATE RMSE + local-stream max step from
 | R4 | 7e59748 | FTZ/DAZ denormal flush on spin threads | 16.6/17.6 | — | — | 33.2/40.6 | 0.100→0.085 | 0.041/0.043 | **No measured CPU win** (denormals not a real cost on this bag); first-run ATE 0.100 was variance (rerun 0.085, in band). KEPT anyway: 2 lines, zero risk, insurance against denormal stalls on real-robot data; preserves NaN/degeneracy semantics unlike -ffast-math. |
 | R5 | (env test) | `LD_PRELOAD=libtbbmalloc_proxy` | 17.3 | 12.4 | 6.1 | 35.9 | 0.083 | 0.040 | **No win** (fusion within noise of R2's 17.0; vo/whycon inflation is ambient load). NOT adopted. tcmalloc untested (not installed; needs sudo — can be A/B'd later the same way). |
 
+| R6 | d8cd6a3 | Round-2 final (optimized build: source deps + march + nanoflann + FTZ; + C++20 set, tidy leftovers, config structs) | 17.5 | 14.8 | 7.3 | 39.6 | 0.093 | 0.040 | Fusion stable at **17.0–17.6** across R2/R4/R5/R6 (−16–18% vs round-1's 20.8). vo/whycon totals inflated by ambient machine load in later runs — fusion CPU is the reliable series metric. Portability gate re-verified: apt-default build (no deps, options OFF) still **65/65 green** on stock GTSAM/PCL 1.14. |
+
+**Round-2 series result (fusion node): 20.8 → ~17.2 CPU-s (−17%)** — effectively all from the nanoflann kNN backend; the source-built/AVX2 infrastructure is what makes it possible (and safe). Evidence-based rejects this round: ApproximateVoxelGrid, `computeDirect`, GN block-view hoist, tbbmalloc. Both build paths (apt default / optimized opt-in per BUILDING.md) verified green.
+
 **Round-1 series result: 46.6 → ~34 CPU-s (−26%)**, all from Phase 3+4 (executor swap, VO thread cap, matcher scratch reuse). Guardrails held throughout: ATE RMSE stayed in the 0.07–0.09 run-to-run band (baseline 0.080), local-stream max step ≤ 0.044 m, VO path ratio 0.96–0.99, 65/65 unit tests at every commit. Rejected with evidence: `-march=x86-64-v3` (GTSAM ABI heap corruption), `-ffast-math` (kills NaN/degeneracy guards), `OMP_NUM_THREADS=1` (no effect), whole-map memoization (hit-rate collapses in motion).
 
 ## Micro-benchmarks
