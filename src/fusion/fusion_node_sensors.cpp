@@ -1,6 +1,11 @@
-// FusionNode — non-LiDAR sensor ingestion: IMU/wheel/marker callbacks, the
-// stationary IMU init state machine, online gyro-bias re-estimation, and the
-// marker motion gate. These fill the buffers the scan hot path consumes.
+/**
+ * @file fusion_node_sensors.cpp
+ * @brief FusionNode non-LiDAR sensor ingestion
+ *
+ * IMU/wheel/marker callbacks, the stationary IMU init state machine, online
+ * gyro-bias re-estimation, and the marker motion gate. These fill the buffers
+ * the scan hot path consumes.
+ */
 #include <algorithm>
 #include <cmath>
 

@@ -1,8 +1,12 @@
-// Micro-benchmark for KeyframeMap::buildLocalMap() with a realistic map: ~80
-// keyframes along a loop, per-keyframe clouds sized like voxel-filtered scan
-// features. "dump" mode prints a coordinate checksum of the built local map
-// in hexfloat — used to prove an optimized build is bit-identical before it
-// replaces the original.
+/**
+ * @file bench_keyframe_map.cpp
+ * @brief Micro-benchmark for KeyframeMap::buildLocalMap() on a realistic map
+ *
+ * 80 keyframes along a loop, per-keyframe clouds sized like voxel-filtered
+ * scan features. "dump" mode prints a coordinate checksum of the built local
+ * map in hexfloat — used to prove an optimized build is bit-identical before
+ * it replaces the original.
+ */
 #include <benchmark/benchmark.h>
 
 #include <cstdio>
@@ -28,7 +32,8 @@ Cloud::Ptr makeCloud(size_t n, unsigned seed)
     return cloud;
 }
 
-/// 80 keyframes along a 14x14 square loop, 0.5 m apart (the sim spacing).
+/// 80 keyframes along a 14x14 square loop, 0.7 m apart (near the sim's 0.5 m
+/// keyframe spacing).
 olive::KeyframeMap& map()
 {
     static olive::KeyframeMap km = [] {

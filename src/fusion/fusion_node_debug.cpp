@@ -1,5 +1,10 @@
-// FusionNode — param-gated RViz debug visualization (keyframe path/map, scan
-// features, fiducial markers). Off the critical output path.
+/**
+ * @file fusion_node_debug.cpp
+ * @brief FusionNode param-gated RViz debug visualization
+ *
+ * Keyframe path/map, scan features, and fiducial markers. Off the critical
+ * output path.
+ */
 #include <pcl/common/transforms.h>
 #include <pcl_conversions/pcl_conversions.h>
 

@@ -61,9 +61,9 @@ VisualOdometryNode::CallbackReturn
     have_intrinsics_              = false;
 
     // Sparse 640x480 VO gains nothing from OpenCV's thread pool, and its TBB
-    // workers busy-spin between frames — measured wasting ~a core. Single-
-    // thread the ops (goodFeaturesToTrack / PyrLK are per-point independent,
-    // so the output is unchanged).
+    // workers busy-spin between frames, wasting roughly a full core (see
+    // benchmark/RESULTS.md). Single-thread the ops (goodFeaturesToTrack /
+    // PyrLK are per-point independent, so the output is unchanged).
     cv::setNumThreads(1);
 
     odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(odom_topic_, rclcpp::QoS(10));

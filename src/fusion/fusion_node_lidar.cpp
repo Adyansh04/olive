@@ -1,6 +1,11 @@
-// FusionNode — the scan hot path: pose prediction, preprocess/deskew/match,
-// keyframe decision, factor insertion (LiDAR/wheel/VO/IMU/markers), iSAM2
-// optimization, correction refresh, and loop closure.
+/**
+ * @file fusion_node_lidar.cpp
+ * @brief FusionNode scan hot path
+ *
+ * Pose prediction, preprocess/deskew/match, keyframe decision, factor
+ * insertion (LiDAR/wheel/VO/IMU/markers), iSAM2 optimization, correction
+ * refresh, and loop closure.
+ */
 #include <gtsam/navigation/CombinedImuFactor.h>
 
 #include <algorithm>

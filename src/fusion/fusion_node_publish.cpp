@@ -1,6 +1,10 @@
-// FusionNode — outputs: fused map-frame odometry + map->odom TF, the smooth
-// odom-frame stream (odomTick extension + LiDAR-dropout coasting), and
-// /diagnostics.
+/**
+ * @file fusion_node_publish.cpp
+ * @brief FusionNode outputs
+ *
+ * Fused map-frame odometry + map->odom TF, the smooth odom-frame stream
+ * (odomTick extension + LiDAR-dropout coasting), and /diagnostics.
+ */
 
 #include <format>
 #include <string>

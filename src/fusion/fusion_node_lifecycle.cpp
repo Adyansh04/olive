@@ -1,6 +1,11 @@
-// FusionNode — bring-up/teardown: parameter declaration + loading, lifecycle
-// transitions, and TF-sourced extrinsics. Runtime paths live in the sibling
-// fusion_node_*.cpp translation units.
+/**
+ * @file fusion_node_lifecycle.cpp
+ * @brief FusionNode bring-up/teardown
+ *
+ * Parameter declaration + loading, lifecycle transitions, and TF-sourced
+ * extrinsics. Runtime paths live in the sibling fusion_node_*.cpp translation
+ * units.
+ */
 #include <gtsam/navigation/CombinedImuFactor.h>
 #include <pcl/common/transforms.h>
 #include <tf2_ros/buffer.h>

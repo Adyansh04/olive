@@ -190,7 +190,8 @@ void ScanMatcher::addPlanarResiduals(const Cloud& planar_scan, const Eigen::Affi
             continue;
 
         const float distance = normal.dot(query.getVector3fMap()) + offset;
-        // The range-scaled weight trusts distant planar points less.
+        // The range-scaled weight tolerates larger residuals on distant
+        // points, where angular noise makes bigger point-to-plane errors expected.
         const float weight =
             1.0F - 0.9F * std::fabs(distance) / std::sqrt(std::sqrt(point.getVector3fMap().norm()));
         if (weight <= 0.1F)

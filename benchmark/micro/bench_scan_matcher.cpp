@@ -1,7 +1,11 @@
-// Micro-benchmark for ScanMatcher::align() on synthetic room geometry sized
-// like a real local map + scan. Run "dump" mode to print the resulting pose
-// in hexfloat — used to prove an optimized build is bit-identical before it
-// replaces the original (see benchmark/README.md).
+/**
+ * @file bench_scan_matcher.cpp
+ * @brief Micro-benchmark for ScanMatcher::align() on synthetic room geometry
+ *
+ * Geometry is sized like a real local map + scan. "dump" mode prints the
+ * resulting pose in hexfloat — used to prove an optimized build is
+ * bit-identical before it replaces the original (see benchmark/README.md).
+ */
 #include <benchmark/benchmark.h>
 #include <pcl/common/transforms.h>
 

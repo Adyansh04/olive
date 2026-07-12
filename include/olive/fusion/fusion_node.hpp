@@ -5,7 +5,7 @@
  * Consumes /lidar/points and /imu/data, runs the LiDAR-inertial front-end
  * (preprocess -> features -> scan-to-map) and maintains the keyframe factor
  * graph. Publishes the graph estimate as odometry. Wheel, marker and visual
- * factors attach to the same graph in later stages.
+ * factors attach to the same graph, each behind a runtime toggle.
  */
 
 #ifndef OLIVE_FUSION_FUSION_NODE_HPP_

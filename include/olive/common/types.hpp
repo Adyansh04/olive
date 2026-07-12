@@ -113,8 +113,9 @@ enum class SensorType
  */
 namespace constants
 {
-// The POSIX macros are replaced by std::numbers everywhere; these asserts pin
-// the swap to the exact same IEEE-754 doubles so fused output cannot move.
+// olive uses std::numbers rather than the POSIX macros; these asserts pin the
+// two to the exact same IEEE-754 doubles, so the choice cannot perturb fused
+// output.
 static_assert(std::numbers::pi == M_PI);
 static_assert(std::numbers::pi / 2.0 == M_PI_2);
 

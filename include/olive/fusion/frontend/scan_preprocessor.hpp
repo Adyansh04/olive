@@ -52,9 +52,9 @@ private:
 /**
  * @brief Rotate every point to the scan's reference (header-stamp) time.
  *
- * @p rotations[k] is the body rotation from the reference time to the k-th
- * of n evenly spaced bin edges across [t_min, t_max] of rel_time (as
- * produced by ImuBuffer::sampleRotations over that interval). Points are
+ * @p rotations[k] is the body rotation from t_min to the k-th of n evenly
+ * spaced bin edges across [t_min, t_max] of rel_time (as produced by
+ * ImuBuffer::sampleRotations over that interval). Points are
  * rotated in the base frame — translation during the scan is ignored, which
  * costs millimeters at ground-robot speeds. No-op when rel_time is empty or
  * all zeros.

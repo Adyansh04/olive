@@ -17,7 +17,7 @@
 namespace olive
 {
 
-/// Per-factor noise sigmas: [roll, pitch, yaw, x, y, z]
+/// Per-factor noise sigmas, ROS order [x, y, z, roll, pitch, yaw]
 using FactorSigmas = std::array<double, 6>;
 
 using CloudPoint = pcl::PointXYZI;

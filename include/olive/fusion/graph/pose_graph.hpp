@@ -26,10 +26,6 @@ namespace olive
 {
 
 /**
- * @brief Noise sigmas for a 6-DoF factor, ROS order [x, y, z, roll, pitch, yaw]
- */
-
-/**
  * @brief Owns the incremental factor graph over keyframe poses X(0..n).
  *
  * Keyframe i is connected to i-1 by relative-pose (between) factors from the

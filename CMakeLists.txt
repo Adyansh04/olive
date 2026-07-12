@@ -13,8 +13,9 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
-# -O3 for the default profile (measured on the maze_1loop replay benchmark)
-# and LTO so inlining still works across the fusion_node TU split.
+# -O3 for the default profile (validated on the full-stack replay benchmark —
+# see benchmark/RESULTS.md) and LTO so inlining still works across the
+# fusion_node TU split.
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g -DNDEBUG")
 cmake_policy(SET CMP0069 NEW)  # honor INTERPROCEDURAL_OPTIMIZATION (LTO)
 include(CheckIPOSupported)
