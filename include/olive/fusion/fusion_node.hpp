@@ -5,12 +5,13 @@
  * Consumes /lidar/points and /imu/data, runs the LiDAR-inertial front-end
  * (preprocess -> features -> scan-to-map) and maintains the keyframe factor
  * graph. Publishes the graph estimate as odometry. Wheel, marker and visual
- * factors attach to the same graph in later stages.
+ * factors attach to the same graph, each behind a runtime toggle.
  */
 
 #ifndef OLIVE_FUSION_FUSION_NODE_HPP_
 #define OLIVE_FUSION_FUSION_NODE_HPP_
 
+#include <gtsam/geometry/Pose3.h>
 #include <tf2_ros/transform_broadcaster.h>
 
 #include <diagnostic_msgs/msg/diagnostic_array.hpp>
@@ -30,20 +31,30 @@
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <whycode_vision/msg/why_code_pose_array.hpp>
 
-#include "olive/fusion/feature_extractor.hpp"
 #include "olive/fusion/fusion_types.hpp"
 #include "olive/fusion/health_monitor.hpp"
-#include "olive/fusion/imu_buffer.hpp"
-#include "olive/fusion/keyframe_map.hpp"
-#include "olive/fusion/loop_detector.hpp"
-#include "olive/fusion/marker_gate.hpp"
-#include "olive/fusion/pose_graph.hpp"
-#include "olive/fusion/scan_matcher.hpp"
-#include "olive/fusion/scan_preprocessor.hpp"
-#include "olive/fusion/wheel_odom_buffer.hpp"
+#include "olive/fusion/inputs/imu_buffer.hpp"
+#include "olive/fusion/inputs/wheel_odom_buffer.hpp"
+
+// Compile firewall: the heavy pipeline components (GTSAM iSAM2, PCL
+// kdtree/voxelgrid) are held by pointer and only their definitions' TUs
+// include them. The out-of-line destructor makes the forward declarations
+// sufficient here.
+namespace gtsam
+{
+class PreintegratedCombinedMeasurements;
+}  // namespace gtsam
 
 namespace olive
 {
+
+class ScanPreprocessor;
+class FeatureExtractor;
+class ScanMatcher;
+class KeyframeMap;
+class PoseGraph;
+class MarkerGate;
+class LoopDetector;
 
 class FusionNode : public rclcpp_lifecycle::LifecycleNode
 {
@@ -52,6 +63,7 @@ public:
         rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
     explicit FusionNode(const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
+    ~FusionNode() override;  // out-of-line: unique_ptr members of forward-declared types
 
     CallbackReturn on_configure(const rclcpp_lifecycle::State& state) override;
     CallbackReturn on_activate(const rclcpp_lifecycle::State& state) override;
@@ -63,10 +75,10 @@ private:
     void loadConfiguration();
 
     // Hot path: one full pipeline pass per scan
-    void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
-    void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg);
-    void wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
-    void markerCallback(const whycode_vision::msg::WhyCodePoseArray::SharedPtr msg);
+    void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr& msg);
+    void imuCallback(const sensor_msgs::msg::Imu::SharedPtr& msg);
+    void wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr& msg);
+    void markerCallback(const whycode_vision::msg::WhyCodePoseArray::SharedPtr& msg);
 
     void         bootstrapFirstKeyframe(const FeatureClouds& features);
     gtsam::Pose3 predictPose(double scan_stamp) const;
@@ -115,14 +127,22 @@ private:
     FactorSigmas vo_between_sigmas_{};
     std::size_t  vo_factors_added_   = 0;  ///< VO betweens that landed
     std::size_t  vo_factors_skipped_ = 0;  ///< VO betweens dropped (coverage)
-    std::string  marker_topic_;
-    gtsam::Pose3 base_from_camera_;
-    double       marker_sigma_m_        = 0.10;
-    double       marker_stamp_window_   = 0.25;
-    bool         marker_landmark_mode_  = true;
-    double       marker_survey_sigma_m_ = 0.05;
-    bool         world_anchored_        = false;
-    std::unordered_map<int, gtsam::Point3> known_markers_;
+    bool         world_anchored_     = false;
+
+    // Marker subsystem: config + survey table, loaded once in loadConfiguration
+    struct MarkerSettings
+    {
+        std::string                            topic;
+        gtsam::Pose3                           base_from_camera;
+        double                                 sigma_m        = 0.10;
+        double                                 stamp_window_s = 0.25;
+        bool                                   landmark_mode  = true;
+        double                                 survey_sigma_m = 0.05;
+        double                                 max_yaw_rate   = 0.6;  ///< blur guard (rad/s)
+        double                                 max_speed      = 1.0;  ///< blur guard (m/s)
+        std::unordered_map<int, gtsam::Point3> known;                 ///< surveyed world positions
+    };
+    MarkerSettings marker_;
 
     // Debug toggles (live-updatable via `ros2 param set`)
     bool                  debug_enabled_       = false;
@@ -173,27 +193,27 @@ private:
     double                                                    imu_preint_max_interval_ = 5.0;
     std::unique_ptr<gtsam::PreintegratedCombinedMeasurements> pim_;
 
-    // IMU initialization state
-    bool   imu_init_done_           = false;
-    double imu_init_window_start_   = -1.0;
-    double imu_init_first_stamp_    = -1.0;
-    double first_scan_stamp_        = -1.0;
-    double imu_init_duration_s_     = 1.5;
-    double imu_init_max_wait_s_     = 10.0;
-    double stationary_gyro_thresh_  = 0.02;
-    double stationary_wheel_thresh_ = 0.005;
-    bool   gyro_bias_reestimate_    = false;
-    bool   deskew_enabled_          = true;
-    int    deskew_time_bins_        = 32;
+    // Stationary IMU-init window (state + thresholds; gates the first scan)
+    struct ImuInit
+    {
+        bool   done         = false;
+        double window_start = -1.0;
+        double first_stamp  = -1.0;
+        double duration_s   = 1.5;
+        double max_wait_s   = 10.0;
+        double gyro_thresh  = 0.02;   ///< stationary gyro |w| (rad/s)
+        double wheel_thresh = 0.005;  ///< stationary wheel speed (m/s)
+    };
+    ImuInit imu_init_;
+    double  first_scan_stamp_     = -1.0;
+    bool    gyro_bias_reestimate_ = false;
+    bool    deskew_enabled_       = true;
+    int     deskew_time_bins_     = 32;
 
     // Cross-sensor time offsets (lidar is the reference; corrected = msg + offset)
     double imu_time_offset_    = 0.0;
     double wheel_time_offset_  = 0.0;
     double camera_time_offset_ = 0.0;
-
-    // Marker motion gating (camera blur guard on real hardware)
-    double marker_max_yaw_rate_ = 0.6;
-    double marker_max_speed_    = 1.0;
 
     // One-shot per-sensor latency characterization at startup
     std::unordered_map<std::string, int> latency_logged_;

@@ -10,7 +10,7 @@ void HealthMonitor::configure(const std::vector<SensorSpec>& sensors)
     for (const SensorSpec& spec : sensors)
     {
         order_.push_back(spec.name);
-        sensors_[spec.name] = Entry{ spec, -1.0, SensorHealth::GOOD, {} };
+        sensors_[spec.name] = Entry{ .spec = spec };  // other fields keep their defaults
     }
 }
 
@@ -53,11 +53,17 @@ std::vector<HealthMonitor::Status> HealthMonitor::evaluate(double now) const
 
         const bool required = entry.spec.timeout > 0.0;
         if (entry.last_beat < 0.0)
+        {
             status.health = required ? SensorHealth::FAILED : SensorHealth::POOR;
+        }
         else if (required && status.age > entry.spec.timeout)
+        {
             status.health = SensorHealth::FAILED;
+        }
         else
+        {
             status.health = entry.quality;
+        }
 
         result.push_back(status);
     }

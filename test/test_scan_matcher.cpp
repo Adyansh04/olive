@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 #include <pcl/common/transforms.h>
 
-#include "olive/fusion/scan_matcher.hpp"
+#include "olive/fusion/frontend/scan_matcher.hpp"
 
 namespace
 {

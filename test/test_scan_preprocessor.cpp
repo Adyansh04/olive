@@ -7,8 +7,8 @@
 
 #include <cstring>
 
-#include "olive/fusion/imu_buffer.hpp"
-#include "olive/fusion/scan_preprocessor.hpp"
+#include "olive/fusion/inputs/imu_buffer.hpp"
+#include "olive/fusion/frontend/scan_preprocessor.hpp"
 
 namespace
 {

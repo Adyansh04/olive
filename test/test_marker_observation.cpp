@@ -11,7 +11,7 @@
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/slam/PriorFactor.h>
 
-#include "olive/fusion/marker_observation_factor.hpp"
+#include "olive/fusion/graph/marker_observation_factor.hpp"
 
 namespace
 {

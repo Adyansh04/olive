@@ -1,8 +1,12 @@
 #include "olive/vo/visual_odometry_node.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cv_bridge/cv_bridge.hpp>
+#include <iterator>
 #include <opencv2/calib3d.hpp>
+#include <opencv2/core/utility.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/video/tracking.hpp>
 
@@ -26,6 +30,7 @@ VisualOdometryNode::VisualOdometryNode(const rclcpp::NodeOptions& options)
     declare_parameter("min_wheel_motion_m", 0.03);
     declare_parameter("max_keyframe_age_s", 2.0);
     declare_parameter("debug", false);
+    declare_parameter("publish_debug_image", false);
 
     if (get_parameter("autostart").as_bool())
     {
@@ -37,29 +42,42 @@ VisualOdometryNode::VisualOdometryNode(const rclcpp::NodeOptions& options)
     }
 }
 
-VisualOdometryNode::CallbackReturn VisualOdometryNode::on_configure(const rclcpp_lifecycle::State&)
+VisualOdometryNode::CallbackReturn
+    VisualOdometryNode::on_configure(const rclcpp_lifecycle::State& /*state*/)
 {
-    image_topic_       = get_parameter("image_topic").as_string();
-    camera_info_topic_ = get_parameter("camera_info_topic").as_string();
-    wheel_odom_topic_  = get_parameter("wheel_odom_topic").as_string();
-    odom_topic_        = get_parameter("odom_topic").as_string();
-    odom_frame_        = get_parameter("odom_frame").as_string();
-    base_frame_        = get_parameter("base_frame").as_string();
-    max_features_      = static_cast<int>(get_parameter("max_features").as_int());
-    min_tracked_       = static_cast<int>(get_parameter("min_tracked_features").as_int());
-    min_parallax_px_   = get_parameter("min_parallax_px").as_double();
-    ransac_threshold_  = get_parameter("ransac_threshold_px").as_double();
-    min_wheel_motion_  = get_parameter("min_wheel_motion_m").as_double();
-    max_keyframe_age_  = get_parameter("max_keyframe_age_s").as_double();
-    debug_             = get_parameter("debug").as_bool();
+    image_topic_         = get_parameter("image_topic").as_string();
+    camera_info_topic_   = get_parameter("camera_info_topic").as_string();
+    wheel_odom_topic_    = get_parameter("wheel_odom_topic").as_string();
+    odom_topic_          = get_parameter("odom_topic").as_string();
+    odom_frame_          = get_parameter("odom_frame").as_string();
+    base_frame_          = get_parameter("base_frame").as_string();
+    max_features_        = static_cast<int>(get_parameter("max_features").as_int());
+    min_tracked_         = static_cast<int>(get_parameter("min_tracked_features").as_int());
+    min_parallax_px_     = get_parameter("min_parallax_px").as_double();
+    ransac_threshold_    = get_parameter("ransac_threshold_px").as_double();
+    min_wheel_motion_    = get_parameter("min_wheel_motion_m").as_double();
+    max_keyframe_age_    = get_parameter("max_keyframe_age_s").as_double();
+    debug_               = get_parameter("debug").as_bool();
+    publish_debug_image_ = get_parameter("publish_debug_image").as_bool();
 
     pose_x_ = pose_y_ = pose_yaw_ = 0.0;
     keyframe_stamp_               = -1.0;
     have_intrinsics_              = false;
 
+    // Sparse 640x480 VO gains nothing from OpenCV's thread pool, and its TBB
+    // workers busy-spin between frames, wasting roughly a full core (see
+    // benchmark/RESULTS.md). Single-thread the ops (goodFeaturesToTrack /
+    // PyrLK are per-point independent, so the output is unchanged).
+    cv::setNumThreads(1);
+
     odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(odom_topic_, rclcpp::QoS(10));
     odom_msg_.header.frame_id = odom_frame_;
     odom_msg_.child_frame_id  = base_frame_;
+
+    if (publish_debug_image_)
+        debug_image_pub_ = create_publisher<sensor_msgs::msg::Image>(
+            "/olive/debug/vo_image",
+            rclcpp::SensorDataQoS().keep_last(2));
 
     RCLCPP_INFO(get_logger(), "Configured (%s -> %s)", image_topic_.c_str(), odom_topic_.c_str());
     return CallbackReturn::SUCCESS;
@@ -95,16 +113,18 @@ VisualOdometryNode::CallbackReturn
     return CallbackReturn::SUCCESS;
 }
 
-VisualOdometryNode::CallbackReturn VisualOdometryNode::on_cleanup(const rclcpp_lifecycle::State&)
+VisualOdometryNode::CallbackReturn
+    VisualOdometryNode::on_cleanup(const rclcpp_lifecycle::State& /*state*/)
 {
     image_sub_.reset();
     camera_info_sub_.reset();
     wheel_sub_.reset();
     odom_pub_.reset();
+    debug_image_pub_.reset();
     return CallbackReturn::SUCCESS;
 }
 
-void VisualOdometryNode::cameraInfoCallback(const sensor_msgs::msg::CameraInfo::SharedPtr msg)
+void VisualOdometryNode::cameraInfoCallback(const sensor_msgs::msg::CameraInfo::SharedPtr& msg)
 {
     focal_           = msg->k[0];
     principal_point_ = { msg->k[2], msg->k[5] };
@@ -112,11 +132,11 @@ void VisualOdometryNode::cameraInfoCallback(const sensor_msgs::msg::CameraInfo::
     camera_info_sub_.reset();  // intrinsics are static in this system
 }
 
-void VisualOdometryNode::wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
+void VisualOdometryNode::wheelOdomCallback(const nav_msgs::msg::Odometry::SharedPtr& msg)
 {
     const double stamp =
         static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec;
-    std::lock_guard<std::mutex> lock(wheel_mutex_);
+    const std::lock_guard<std::mutex> lock(wheel_mutex_);
     wheel_samples_.push_back({ stamp, msg->pose.pose.position.x, msg->pose.pose.position.y });
     while (!wheel_samples_.empty() && wheel_samples_.front()[0] < stamp - 30.0)
         wheel_samples_.pop_front();
@@ -124,7 +144,7 @@ void VisualOdometryNode::wheelOdomCallback(const nav_msgs::msg::Odometry::Shared
 
 std::optional<double> VisualOdometryNode::wheelDistance(double t0, double t1) const
 {
-    std::lock_guard<std::mutex> lock(wheel_mutex_);
+    const std::lock_guard<std::mutex> lock(wheel_mutex_);
     if (wheel_samples_.size() < 2)
         return std::nullopt;
 
@@ -153,7 +173,7 @@ void VisualOdometryNode::adoptKeyframe(const cv::Mat& gray, double stamp)
     keyframe_stamp_ = stamp;
 }
 
-void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
+void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr& msg)
 {
     if (!have_intrinsics_)
         return;
@@ -161,17 +181,31 @@ void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr 
     const double stamp =
         static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec;
 
-    cv::Mat gray;
-    cv::cvtColor(cv_bridge::toCvShare(msg, "rgb8")->image, gray, cv::COLOR_RGB2GRAY);
+    const auto cv_ptr = cv_bridge::toCvShare(msg, "rgb8");
+    cv::Mat    gray;
+    cv::cvtColor(cv_ptr->image, gray, cv::COLOR_RGB2GRAY);
+
+    // Only pay the draw/encode cost when the overlay is enabled and something
+    // (RViz, a recorder) is actually subscribed.
+    const bool draw =
+        publish_debug_image_ && debug_image_pub_ && debug_image_pub_->get_subscription_count() > 0;
+    const auto emit = [&](const std::vector<cv::Point2f>& from,
+                          const std::vector<cv::Point2f>& to,
+                          const cv::Mat&                  inliers,
+                          const std::string&              status) {
+        if (draw)
+            publishDebugImage(cv_ptr->image, from, to, inliers, status, msg->header);
+    };
 
     // Bound the keyframe age: a stall (in-place turn, stationary pause) can leave
     // a keyframe lingering until it is older than the wheel buffer, after which
     // wheelDistance() can never resolve scale and VO wedges forever. Force a fresh
     // keyframe well within the wheel history so it always recovers.
-    if (keyframe_stamp_ < 0.0 || static_cast<int>(keyframe_features_.size()) < min_tracked_ ||
+    if (keyframe_stamp_ < 0.0 || std::ssize(keyframe_features_) < min_tracked_ ||
         (stamp - keyframe_stamp_) > max_keyframe_age_)
     {
         adoptKeyframe(gray, stamp);
+        emit({}, keyframe_features_, cv::Mat(), "KEYFRAME adopted");
         return;
     }
 
@@ -193,7 +227,7 @@ void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr 
         parallax += cv::norm(tracked[i] - keyframe_features_[i]);
     }
 
-    if (static_cast<int>(p0.size()) < min_tracked_)
+    if (std::ssize(p0) < min_tracked_)
     {
         if (debug_)
         {
@@ -207,6 +241,7 @@ void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr 
                 min_tracked_,
                 keyframe_features_.size());
         }
+        emit(p0, p1, cv::Mat(), "re-adopt: lost tracking");
         adoptKeyframe(gray, stamp);
         return;
     }
@@ -224,6 +259,7 @@ void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr 
                 min_parallax_px_,
                 p0.size());
         }
+        emit(p0, p1, cv::Mat(), "waiting: building baseline");
         return;  // not enough baseline yet
     }
 
@@ -240,6 +276,7 @@ void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr 
                 keyframe_stamp_,
                 stamp);
         }
+        emit(p0, p1, cv::Mat(), "waiting: no wheel scale");
         return;  // no scale reference yet; keep accumulating baseline
     }
     if (debug_)
@@ -261,7 +298,10 @@ void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr 
         // Small flow with sub-gate wheel motion is a slow forward crawl —
         // keep the keyframe and wait for more baseline instead.
         if (parallax < 4.0 * min_parallax_px_)
+        {
+            emit(p0, p1, cv::Mat(), "waiting: slow crawl");
             return;
+        }
 
         cv::Mat       inliers;
         const cv::Mat essential = cv::findEssentialMat(
@@ -280,6 +320,7 @@ void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr 
         cv::recoverPose(essential, p0, p1, rotation, translation, focal_, principal_point_, inliers);
         // Optical frame: yaw of the body = rotation about the camera y axis.
         pose_yaw_ += std::atan2(rotation.at<double>(0, 2), rotation.at<double>(2, 2));
+        emit(p0, p1, inliers, "PUBLISH: rotation-only");
         adoptKeyframe(gray, stamp);
         publishOdometry(stamp);
         return;
@@ -304,6 +345,7 @@ void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr 
         cv::recoverPose(essential, p0, p1, rotation, translation, focal_, principal_point_, inliers);
     if (inlier_count < min_tracked_ / 2)
     {
+        emit(p0, p1, inliers, "re-adopt: degenerate pose");
         adoptKeyframe(gray, stamp);
         return;
     }
@@ -328,6 +370,7 @@ void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr 
     pose_y_ += std::sin(pose_yaw_) * forward + std::cos(pose_yaw_) * left;
     pose_yaw_ += delta_yaw;
 
+    emit(p0, p1, inliers, "PUBLISH: translation");
     adoptKeyframe(gray, stamp);
     publishOdometry(stamp);
 }
@@ -344,6 +387,84 @@ void VisualOdometryNode::publishOdometry(double stamp)
     odom_msg_.pose.pose.orientation.w = std::cos(pose_yaw_ / 2.0);
     odom_msg_.pose.pose.orientation.z = std::sin(pose_yaw_ / 2.0);
     odom_pub_->publish(odom_msg_);
+}
+
+void VisualOdometryNode::publishDebugImage(
+    const cv::Mat&                  rgb,
+    const std::vector<cv::Point2f>& from,
+    const std::vector<cv::Point2f>& to,
+    const cv::Mat&                  inliers,
+    const std::string&              status,
+    const std_msgs::msg::Header&    header)
+{
+    if (!debug_image_pub_ || !debug_image_pub_->is_activated())
+        return;
+
+    cv::Mat canvas = rgb.clone();  // rgb8; scalars below are in RGB order to match
+
+    const cv::Scalar green(40, 220, 40);    // inlier / accepted correspondence
+    const cv::Scalar red(235, 70, 50);      // outlier / rejected / lost track
+    const cv::Scalar yellow(250, 210, 40);  // healthy flow, still building baseline
+    const cv::Scalar cyan(40, 210, 240);    // freshly detected keyframe corner
+
+    const size_t n           = std::min(from.size(), to.size());
+    const bool   have_inlier = static_cast<size_t>(inliers.rows) == to.size() && inliers.cols >= 1;
+
+    if (from.empty())
+    {
+        // Keyframe adoption: nothing to track from yet — show the new corners.
+        for (const auto& pt : to)
+            cv::circle(canvas, pt, 3, cyan, 1, cv::LINE_AA);
+    }
+    else
+    {
+        // Optical flow: tail = keyframe corner, head = tracked position.
+        for (size_t i = 0; i < n; ++i)
+        {
+            const bool inlier    = have_inlier ? inliers.at<uchar>(static_cast<int>(i)) != 0 : true;
+            const cv::Scalar col = have_inlier ? (inlier ? green : red) : yellow;
+            cv::line(canvas, from[i], to[i], col, 1, cv::LINE_AA);
+            cv::circle(canvas, to[i], 3, col, -1, cv::LINE_AA);
+        }
+    }
+
+    // HUD: feature count and mean flow magnitude (px).
+    double flow = 0.0;
+    for (size_t i = 0; i < n; ++i)
+        flow += cv::norm(to[i] - from[i]);
+    if (n > 0)
+        flow /= static_cast<double>(n);
+
+    char hud[96];
+    if (from.empty())
+        std::snprintf(hud, sizeof(hud), "VO  feat:%zu", to.size());
+    else
+        std::snprintf(hud, sizeof(hud), "VO  feat:%zu  flow:%.1fpx", to.size(), flow);
+
+    cv::Scalar status_col = yellow;
+    if (status.rfind("PUBLISH", 0) == 0)
+        status_col = green;
+    else if (status.rfind("KEYFRAME", 0) == 0)
+        status_col = cyan;
+    else if (status.rfind("re-adopt", 0) == 0)
+        status_col = red;
+
+    // Draw each line twice (dark halo, then colour) so it reads on any scene.
+    const cv::Scalar shadow(15, 15, 15);
+    cv::putText(canvas, hud, { 10, 24 }, cv::FONT_HERSHEY_SIMPLEX, 0.6, shadow, 3, cv::LINE_AA);
+    cv::putText(
+        canvas,
+        hud,
+        { 10, 24 },
+        cv::FONT_HERSHEY_SIMPLEX,
+        0.6,
+        { 235, 235, 235 },
+        1,
+        cv::LINE_AA);
+    cv::putText(canvas, status, { 10, 50 }, cv::FONT_HERSHEY_SIMPLEX, 0.6, shadow, 3, cv::LINE_AA);
+    cv::putText(canvas, status, { 10, 50 }, cv::FONT_HERSHEY_SIMPLEX, 0.6, status_col, 1, cv::LINE_AA);
+
+    debug_image_pub_->publish(*cv_bridge::CvImage(header, "rgb8", canvas).toImageMsg());
 }
 
 }  // namespace olive

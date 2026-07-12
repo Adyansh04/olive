@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 #include <pcl/common/transforms.h>
 
-#include "olive/fusion/loop_detector.hpp"
+#include "olive/fusion/graph/loop_detector.hpp"
 
 namespace
 {

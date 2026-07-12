@@ -1,11 +1,17 @@
 # OLIVE
 
-**O**ptimization of **L**idar, **I**nertial, **V**ision & **E**ncoders — graph-based multi-modal sensor fusion for a planar ground robot. ROS 2 **Jazzy**, C++17, [GTSAM](https://github.com/borglab/gtsam) factor-graph backend.
+**O**ptimization of **L**idar, **I**nertial, **V**ision & **E**ncoders — graph-based multi-modal sensor fusion for a planar ground robot. ROS 2 **Jazzy**, C++20, [GTSAM](https://github.com/borglab/gtsam) factor-graph backend.
 
 One iSAM2 keyframe graph fuses LiDAR, IMU (tightly coupled), wheel encoders, WhyCode fiducials and monocular visual odometry, with ICP loop closure. It produces both a globally-accurate map-frame pose and a smooth, jump-free odom-frame stream — a drop-in localization backend for Nav2.
 
 <p align="center">
-<img src="media/trajectory.png" width="49%" alt="Fused trajectory vs ground truth over 3 maze loops (2.3 cm RMSE)">
+<img src="media/olive_demo.gif" width="90%" alt="Live RViz view of OLIVE fusing LiDAR, IMU, wheels, camera and fiducial markers over one maze loop">
+</p>
+
+*Live RViz over one maze loop. The **green** arrows/line are the globally-accurate map-frame estimate; the **blue** arrows are the smooth local odometry a controller drives on. **Yellow** (edge) and **cyan** (planar) points are the current LiDAR scan's features, matched against the **orange/grey** accumulated map — watch them stay locked together. When a fiducial sphere flips **grey → green** and fires a green ray, it's being used as an anchor: the green trajectory **snaps** to correct the accumulated drift while the blue local track stays perfectly smooth (the correction goes entirely into `map→odom`), then the sphere settles to **blue**. Bottom-right is the camera with the visual-odometry overlay — **green** = inlier feature tracks, **yellow** = tracking while it builds baseline.*
+
+<p align="center">
+<img src="media/trajectory.png" width="49%" alt="Fused trajectory vs ground truth over 3 maze loops (2.0 cm RMSE)">
 <img src="media/local_vs_wheel.png" width="49%" alt="Smooth local odometry stays tight while raw wheel odometry drifts">
 </p>
 
@@ -38,19 +44,97 @@ The LiDAR-inertial core follows the architecture of [LIO-SAM](https://github.com
 - **`vo_node`** — monocular VO front-end: KLT tracking + essential matrix, yaw from in-place rotation, translation scaled by wheel motion (monocular scale is unobservable on a planar robot). Publishes `/olive/visual_odom`.
 - **`whycon`** (from `whycode_vision`) — marker detector, launched when `markers` is enabled; sim configs live in `config/whycode_detector_sim.yaml`.
 
-## Build & run
+Source layout (mirrored in `include/olive/`):
+
+```
+src/
+  nodes/              executable mains
+  fusion/             FusionNode split by concern:
+    fusion_node_lifecycle.cpp   parameters, config, lifecycle transitions
+    fusion_node_sensors.cpp     IMU/wheel/marker callbacks, IMU init, bias
+    fusion_node_lidar.cpp       scan hot path, factor insertion, iSAM2, loops
+    fusion_node_publish.cpp     odometry outputs, TF, diagnostics
+    fusion_node_debug.cpp       RViz debug visualization
+    frontend/         scan preprocessing, feature extraction, scan matching
+    graph/            pose graph, keyframe map, loop detection, marker factors
+    inputs/           IMU / wheel-odom buffers, marker gate
+  vo/                 monocular VO front-end
+scripts/              bringup/ · evaluation/ · fault_injection/  (see scripts/README.md)
+benchmark/            full-stack replay + micro benchmarks, per-change results log
+```
+
+## Build
 
 ```zsh
 source /opt/ros/jazzy/setup.zsh
 cd ~/olive_ws
 colcon build --symlink-install --packages-select olive
-source install/setup.zsh
-
-# simulation (separate terminal): ros2 launch olive_sim simulation.launch.py world_name:=maze headless:=true
-ros2 launch olive sensor_fusion.launch.py
+source install/setup.zsh          # source after every build
 ```
 
-The launch reads `config/fusion.yaml`, starts only the enabled modalities, and passes each node its parameter section. `whycode_vision` needs the [Simd](https://github.com/ermig1979/Simd) library (build to a prefix and pass `-DSIMD_INCLUDE_DIR`/`-DSIMD_LIBRARY` if it is not in `/usr/local`).
+The default build uses the stock apt GTSAM/PCL and works everywhere. For the
+optimized build — source-built GTSAM + PCL 1.15 with AVX2 and the ~2× faster
+nanoflann scan-matcher search — see [BUILDING.md](BUILDING.md); per-change
+measurements are in [benchmark/RESULTS.md](benchmark/RESULTS.md).
+
+`whycode_vision` (the marker detector) needs the [Simd](https://github.com/ermig1979/Simd)
+library — build it to a prefix and pass `-DSIMD_INCLUDE_DIR`/`-DSIMD_LIBRARY` if
+it is not in `/usr/local`.
+
+## Run
+
+**Fastest path — one command brings up sim + fusion in the maze and drives a
+test loop.** `bringup_test.sh` kills stragglers, launches exactly one sim + one
+stack, verifies the process counts, then runs the chosen test:
+
+```zsh
+# ros2 run olive bringup_test.sh [world] [test] [rviz]
+#   world: maze | fusion_test | warehouse | office | industrial
+#   test:  none | drive | drive-long | ate | marker | smooth
+ros2 run olive bringup_test.sh maze drive
+ros2 run olive bringup_test.sh maze none rviz   # bring up + RViz debug view, no test
+```
+
+**Or run the pieces yourself, one per terminal:**
+
+```zsh
+# 1. Simulation (Gazebo Harmonic). headless:=true = no GUI; drop it to watch.
+ros2 launch olive_sim simulation.launch.py world_name:=maze headless:=true
+
+# 2. Fusion stack — reads config/fusion.yaml, starts only the modalities enabled
+#    under `modalities:`, and hands each node its parameter section.
+#    rviz:=true opens the debug view; config_file:=<path> overrides fusion.yaml;
+#    debug:=off force-disables every debug stream for a peak-performance run.
+ros2 launch olive sensor_fusion.launch.py rviz:=true
+
+# 3. Drive a repeatable closed-loop square (chases corners via /ground_truth)
+ros2 run olive square_drive.py --half 7.0 --loops 3 --speed 0.4
+```
+
+Fused output appears on `/olive/odometry` (map frame) and `/olive/odometry_local`
+(smooth odom frame); debug streams are under `/olive/debug/*` (on in the sim
+config). Pass `debug:=off` to disable them all in one shot for a peak-performance
+run, or toggle individual flags in `config/fusion.yaml`.
+
+**Record once, replay offline** — the cheap iteration loop, and what the
+benchmarks use. Capture the raw sensor streams with the sim running, then replay
+them through the stack with no simulator (faster and deterministic):
+
+```zsh
+# record raw inputs while a drive runs (sim + fusion up)
+ros2 bag record -o my_run /lidar/points /imu/data /odom /camera/image_raw \
+                          /camera/camera_info /tf /tf_static /clock /ground_truth
+
+# later: start the fusion stack, then replay the inputs into it
+ros2 bag play my_run --clock
+
+# evaluate any recorded run offline — ATE, smooth-stream continuity, VO health
+ros2 run olive analyze_bag.py my_run --max-step 0.05
+```
+
+More validation, calibration, and fault-injection tools are documented in
+[`scripts/README.md`](scripts/README.md); the fixed CPU benchmark is in
+[`benchmark/README.md`](benchmark/README.md).
 
 ## Configuration
 
@@ -109,10 +193,13 @@ multi-metre `map→odom` jump).
 ## Tests
 
 ```zsh
-colcon test --packages-select olive   # covariance conventions, scan matcher on
-                                      # synthetic geometry, marker anchor factor
-                                      # (analytic vs numerical Jacobians, drift recovery)
+colcon test --packages-select olive && colcon test-result
 ```
+
+65 unit tests across 12 suites: covariance conventions, scan preprocessing and
+matching on synthetic geometry, keyframe map + cloud budget, marker
+anchor/observation factors (analytic vs numerical Jacobians, drift recovery),
+buffers, health monitoring, and loop detection.
 
 ## Results
 
@@ -120,15 +207,15 @@ Gazebo Harmonic, maze world (16×16 m), 3 loops of a 56 m square. The maze is
 textured (tiled floor, brick/panel/block walls), dressed with wall paintings and
 3-D props, and its markers sit on white backing panels — feature-rich enough for
 the monocular VO front-end. Figures are generated from a recorded bag by
-[`scripts/plot_results.py`](scripts/plot_results.py).
+[`scripts/evaluation/plot_results.py`](scripts/evaluation/plot_results.py).
 
 | Metric | Value |
 |--------|-------|
-| Absolute trajectory error (post-anchor, vs ground truth) | **2.3 cm RMSE**, 4.8 cm max |
+| Absolute trajectory error (post-anchor, vs ground truth) | **2.0 cm RMSE**, 4.6 cm max |
 | Fused ATE, VO on vs off (steady-state) | **~2 cm vs 3.6 cm** — VO on is not worse (tight-sigma VO: 29 m) |
-| Drive-test relative accuracy (35 s multi-turn) | **1.4 cm / 0.22°** |
+| Drive-test relative accuracy (35 s multi-turn) | **0.8 cm / 0.04°** |
 | First-anchor drift reset (spawn frame → world) | 8.5 m → few cm, one sighting |
-| Local-stream max step, 3 loops (all corrections in `map→odom`) | **4.2 cm** |
+| Local-stream max step, 3 loops (all corrections in `map→odom`) | **2.4 cm** |
 | Monocular VO scale accuracy (path length vs ground truth) | **0.98** (heading drifts uncorrected — fused loose) |
 | Unsurveyed-marker landmark convergence | **6–8 cm** from sightings alone |
 | LiDAR-core throughput | 10 Hz, 6–12 ms/scan |
@@ -196,15 +283,15 @@ in-place turns — is a possible future improvement; the fusion does not need it
 - **Marker odometry / LiDAR blackout**: during a 25 s LiDAR outage, marker
   observations pull the coasted trajectory back to **1.1 cm** final error;
   with markers off the same outage drifts 4.9 m and never recovers.
-- **Corrupted wheel odometry** (`scripts/wheel_odom_relay.py`, ~13 m injected
+- **Corrupted wheel odometry** (`scripts/fault_injection/wheel_odom_relay.py`, ~13 m injected
   drift): the fused output is unchanged — LiDAR + markers carry the estimate.
 - **Loop closure** (crippled matcher, no wheel factors): an out-and-back route
   improves from 4.44 m to **0.39 m** final error (11×).
 - **Endurance**: a 10-minute continuous drive with bounded cloud storage ends
   1–2 cm from ground truth, with per-sensor `/diagnostics` health throughout.
 
-Reproduce: record with [`scripts/square_drive.py`](scripts/square_drive.py) +
+Reproduce: record with [`scripts/bringup/square_drive.py`](scripts/bringup/square_drive.py) +
 `ros2 bag record`, analyse offline with
-[`scripts/analyze_bag.py`](scripts/analyze_bag.py), and regenerate these
-figures with `scripts/plot_results.py`. A full replay walkthrough is in
-`demo/REPLAY_GUIDE.md`.
+[`scripts/evaluation/analyze_bag.py`](scripts/evaluation/analyze_bag.py), and regenerate these
+figures with `scripts/evaluation/plot_results.py`. For CPU numbers, use the
+fixed replay benchmark in [`benchmark/`](benchmark/README.md).

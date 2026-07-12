@@ -5,7 +5,7 @@
 
 #include <gtest/gtest.h>
 
-#include "olive/fusion/marker_gate.hpp"
+#include "olive/fusion/inputs/marker_gate.hpp"
 
 namespace
 {

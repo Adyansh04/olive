@@ -27,6 +27,27 @@ def launch_fusion_stack(context, *args, **kwargs):
 
     modalities = config.get('modalities', {})
 
+    # Global debug override (debug:=on|off). Unset leaves the per-flag values
+    # in fusion.yaml untouched; on/off force every olive debug flag together so
+    # a peak-performance run is one argument, not a dozen `ros2 param set`s.
+    debug_arg = context.launch_configurations.get('debug', '').strip().lower()
+    if debug_arg in ('on', 'true', '1', 'enable', 'enabled'):
+        debug_override = True
+    elif debug_arg in ('off', 'false', '0', 'disable', 'disabled'):
+        debug_override = False
+    else:
+        debug_override = None
+    fusion_debug_flags = ('publish_debug', 'debug_path', 'debug_keyframes',
+                          'debug_local_map', 'debug_scan_features',
+                          'debug_fiducials', 'debug_imu_state')
+    vo_debug_flags = ('debug', 'publish_debug_image')
+
+    def apply_debug_override(params, flags):
+        if debug_override is not None:
+            for flag in flags:
+                params[flag] = debug_override
+        return params
+
     # The config mixes launch-level keys (modalities) with node sections, so
     # each node receives its section as a dict rather than the raw file (the
     # strict rcl params parser rejects non-node top-level keys).
@@ -39,6 +60,7 @@ def launch_fusion_stack(context, *args, **kwargs):
         params['use_wheel_odom'] = bool(modalities.get('wheel', False))
         params['use_markers'] = bool(modalities.get('markers', False))
         params['use_vo'] = bool(modalities.get('vo', False))
+        apply_debug_override(params, fusion_debug_flags)
         return Node(
             package='olive',
             executable='fusion_node',
@@ -58,12 +80,13 @@ def launch_fusion_stack(context, *args, **kwargs):
         )
 
     def vo_node(_config_file):
+        params = apply_debug_override(dict(node_params('vo_node')), vo_debug_flags)
         return Node(
             package='olive',
             executable='vo_node',
             name='vo_node',
             output='screen',
-            parameters=[node_params('vo_node')],
+            parameters=[params],
         )
 
     # modality -> Node factory. 'lio' starts the fusion core itself (the
@@ -88,6 +111,9 @@ def launch_fusion_stack(context, *args, **kwargs):
     enabled = [name for name, on in modalities.items() if on]
     print(f"[olive] fusion config: {config_file}")
     print(f"[olive] enabled modalities: {', '.join(enabled) if enabled else 'none'}")
+    if debug_override is not None:
+        print(f"[olive] debug override: all debug flags forced "
+              f"{'ON' if debug_override else 'OFF'}")
 
     for name in enabled:
         if name not in node_registry:
@@ -111,9 +137,17 @@ def generate_launch_description():
         default_value='false',
         description='Start RViz with the fusion debug configuration'
     )
+    declare_debug = DeclareLaunchArgument(
+        'debug',
+        default_value='',
+        description='Force every olive debug flag on/off (fusion + vo). '
+                    'on|off; unset keeps the per-flag values in fusion.yaml. '
+                    'Use debug:=off for peak-performance runs.'
+    )
 
     ld = LaunchDescription()
     ld.add_action(declare_config_file)
     ld.add_action(declare_rviz)
+    ld.add_action(declare_debug)
     ld.add_action(OpaqueFunction(function=launch_fusion_stack))
     return ld

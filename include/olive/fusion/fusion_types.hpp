@@ -10,11 +10,15 @@
 #include <pcl/point_types.h>
 
 #include <Eigen/Dense>
+#include <array>
 #include <string>
 #include <vector>
 
 namespace olive
 {
+
+/// Per-factor noise sigmas, ROS order [x, y, z, roll, pitch, yaw]
+using FactorSigmas = std::array<double, 6>;
 
 using CloudPoint = pcl::PointXYZI;
 using Cloud      = pcl::PointCloud<CloudPoint>;

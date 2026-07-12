@@ -5,7 +5,7 @@
 
 #include <gtest/gtest.h>
 
-#include "olive/fusion/pose_graph.hpp"
+#include "olive/fusion/graph/pose_graph.hpp"
 
 namespace
 {

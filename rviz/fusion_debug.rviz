@@ -1,13 +1,11 @@
 Panels:
   - Class: rviz_common/Displays
-    Help Height: 70
+    Help Height: 138
     Name: Displays
     Property Tree Widget:
-      Expanded:
-        - /Fused Odometry1
-        - /Debug Path1
-      Splitter Ratio: 0.55
-    Tree Height: 550
+      Expanded: ~
+      Splitter Ratio: 0.550000011920929
+    Tree Height: 1014
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -16,189 +14,389 @@ Panels:
 Visualization Manager:
   Class: ""
   Displays:
-    - Class: rviz_default_plugins/Grid
-      Enabled: true
-      Name: Grid
+    - Alpha: 0.5
       Cell Size: 1
+      Class: rviz_default_plugins/Grid
       Color: 100; 100; 100
+      Enabled: true
+      Line Style:
+        Line Width: 0.029999999329447746
+        Value: Lines
+      Name: Grid
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
       Plane: XY
       Plane Cell Count: 20
       Reference Frame: <Fixed Frame>
       Value: true
     - Class: rviz_default_plugins/TF
       Enabled: true
+      Filter (blacklist): ""
+      Filter (whitelist): ""
+      Frame Timeout: 15
+      Frames:
+        All Enabled: true
+        base_footprint:
+          Value: true
+        base_link:
+          Value: true
+        camera_link:
+          Value: true
+        camera_optical_link:
+          Value: true
+        front_caster:
+          Value: true
+        imu_link:
+          Value: true
+        left_wheel:
+          Value: true
+        lidar_link:
+          Value: true
+        map:
+          Value: true
+        odom:
+          Value: true
+        rear_caster:
+          Value: true
+        right_wheel:
+          Value: true
+      Marker Scale: 1.5
       Name: TF
       Show Arrows: false
       Show Axes: true
       Show Names: true
-      Marker Scale: 1.5
-      Frame Timeout: 15
-      Frames:
-        All Enabled: true
+      Tree:
+        map:
+          odom:
+            base_footprint:
+              base_link:
+                camera_link:
+                  camera_optical_link:
+                    {}
+                front_caster:
+                  {}
+                imu_link:
+                  {}
+                left_wheel:
+                  {}
+                lidar_link:
+                  {}
+                rear_caster:
+                  {}
+                right_wheel:
+                  {}
+      Update Interval: 0
       Value: true
-    - Class: rviz_default_plugins/Odometry
+    - Angle Tolerance: 0.05000000074505806
+      Class: rviz_default_plugins/Odometry
+      Covariance:
+        Orientation:
+          Alpha: 0.5
+          Color: 255; 255; 127
+          Color Style: Unique
+          Frame: Local
+          Offset: 1
+          Scale: 1
+          Value: true
+        Position:
+          Alpha: 0.30000001192092896
+          Color: 204; 51; 204
+          Scale: 1
+          Value: true
+        Value: false
       Enabled: true
+      Keep: 100
       Name: Fused Odometry
+      Position Tolerance: 0.05000000074505806
+      Shape:
+        Alpha: 1
+        Axes Length: 1
+        Axes Radius: 0.10000000149011612
+        Color: 0; 255; 0
+        Head Length: 0.10000000149011612
+        Head Radius: 0.05999999865889549
+        Shaft Length: 0.30000001192092896
+        Shaft Radius: 0.029999999329447746
+        Value: Arrow
       Topic:
         Depth: 5
         Durability Policy: Volatile
+        Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /olive/odometry
-      Keep: 100
-      Position Tolerance: 0.05
-      Angle Tolerance: 0.05
-      Shape:
-        Value: Arrow
-        Color: 0; 255; 0
-        Alpha: 1
-        Shaft Length: 0.3
-        Shaft Radius: 0.03
-        Head Length: 0.1
-        Head Radius: 0.06
-      Covariance:
-        Value: false
       Value: true
-    - Class: rviz_default_plugins/Odometry
+    - Angle Tolerance: 0.05000000074505806
+      Class: rviz_default_plugins/Odometry
+      Covariance:
+        Orientation:
+          Alpha: 0.5
+          Color: 255; 255; 127
+          Color Style: Unique
+          Frame: Local
+          Offset: 1
+          Scale: 1
+          Value: true
+        Position:
+          Alpha: 0.30000001192092896
+          Color: 204; 51; 204
+          Scale: 1
+          Value: true
+        Value: false
       Enabled: true
+      Keep: 100
       Name: Local Odometry (smooth)
+      Position Tolerance: 0.05000000074505806
+      Shape:
+        Alpha: 1
+        Axes Length: 1
+        Axes Radius: 0.10000000149011612
+        Color: 0; 128; 255
+        Head Length: 0.07000000029802322
+        Head Radius: 0.03999999910593033
+        Shaft Length: 0.20000000298023224
+        Shaft Radius: 0.019999999552965164
+        Value: Arrow
       Topic:
         Depth: 5
         Durability Policy: Volatile
+        Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /olive/odometry_local
-      Keep: 100
-      Position Tolerance: 0.05
-      Angle Tolerance: 0.05
-      Shape:
-        Value: Arrow
-        Color: 0; 128; 255
-        Alpha: 1
-        Shaft Length: 0.2
-        Shaft Radius: 0.02
-        Head Length: 0.07
-        Head Radius: 0.04
-      Covariance:
-        Value: false
       Value: true
-    - Class: rviz_default_plugins/Odometry
+    - Angle Tolerance: 0.05000000074505806
+      Class: rviz_default_plugins/Odometry
+      Covariance:
+        Orientation:
+          Alpha: 0.5
+          Color: 255; 255; 127
+          Color Style: Unique
+          Frame: Local
+          Offset: 1
+          Scale: 1
+          Value: true
+        Position:
+          Alpha: 0.30000001192092896
+          Color: 204; 51; 204
+          Scale: 1
+          Value: true
+        Value: false
       Enabled: false
+      Keep: 100
       Name: Ground Truth
+      Position Tolerance: 0.05000000074505806
+      Shape:
+        Alpha: 1
+        Axes Length: 1
+        Axes Radius: 0.10000000149011612
+        Color: 255; 0; 0
+        Head Length: 0.10000000149011612
+        Head Radius: 0.05999999865889549
+        Shaft Length: 0.30000001192092896
+        Shaft Radius: 0.029999999329447746
+        Value: Arrow
       Topic:
         Depth: 5
         Durability Policy: Volatile
+        Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /ground_truth
-      Keep: 100
-      Position Tolerance: 0.05
-      Angle Tolerance: 0.05
-      Shape:
-        Value: Arrow
-        Color: 255; 0; 0
-        Alpha: 1
-        Shaft Length: 0.3
-        Shaft Radius: 0.03
-        Head Length: 0.1
-        Head Radius: 0.06
-      Covariance:
-        Value: false
       Value: false
-    - Class: rviz_default_plugins/Path
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 25; 255; 25
       Enabled: true
+      Head Diameter: 0.30000001192092896
+      Head Length: 0.20000000298023224
+      Length: 0.30000001192092896
+      Line Style: Lines
+      Line Width: 0.029999999329447746
       Name: Debug Path
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Radius: 0.029999999329447746
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
       Topic:
         Depth: 5
         Durability Policy: Transient Local
+        Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /olive/debug/path
-      Line Style: Lines
-      Color: 25; 255; 25
-      Alpha: 1
-      Buffer Length: 1
       Value: true
-    - Class: rviz_default_plugins/PoseArray
+    - Alpha: 1
+      Arrow Length: 0.30000001192092896
+      Axes Length: 0.20000000298023224
+      Axes Radius: 0.019999999552965164
+      Class: rviz_default_plugins/PoseArray
+      Color: 255; 25; 0
       Enabled: true
+      Head Length: 0.07000000029802322
+      Head Radius: 0.029999999329447746
       Name: Keyframes
+      Shaft Length: 0.23000000417232513
+      Shaft Radius: 0.009999999776482582
+      Shape: Axes
       Topic:
         Depth: 5
         Durability Policy: Transient Local
+        Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /olive/debug/keyframes
-      Shape: Axes
-      Axes Length: 0.2
-      Axes Radius: 0.02
       Value: true
-    - Class: rviz_default_plugins/PointCloud2
+    - Alpha: 0.6000000238418579
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz_default_plugins/PointCloud2
+      Color: 160; 160; 164
+      Color Transformer: FlatColor
+      Decay Time: 0
       Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
       Name: Local Map (planar)
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 2
+      Size (m): 0.009999999776482582
+      Style: Points
       Topic:
         Depth: 5
         Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /olive/debug/map_planars
-      Style: Points
-      Size (Pixels): 2
-      Color Transformer: FlatColor
-      Color: 160; 160; 164
-      Alpha: 0.6
-      Position Transformer: XYZ
+      Use Fixed Frame: true
+      Use rainbow: true
       Value: true
-    - Class: rviz_default_plugins/PointCloud2
+    - Alpha: 0.8999999761581421
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz_default_plugins/PointCloud2
+      Color: 255; 85; 0
+      Color Transformer: FlatColor
+      Decay Time: 0
       Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
       Name: Local Map (edges)
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.05999999865889549
+      Style: Spheres
       Topic:
         Depth: 5
         Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /olive/debug/map_edges
-      Style: Spheres
-      Size (m): 0.06
-      Color Transformer: FlatColor
-      Color: 255; 85; 0
-      Alpha: 0.9
-      Position Transformer: XYZ
+      Use Fixed Frame: true
+      Use rainbow: true
       Value: true
-    - Class: rviz_default_plugins/PointCloud2
+    - Alpha: 0.800000011920929
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz_default_plugins/PointCloud2
+      Color: 0; 170; 255
+      Color Transformer: FlatColor
+      Decay Time: 0
       Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
       Name: Scan Features (planar)
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.009999999776482582
+      Style: Points
       Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /olive/debug/scan_planars
-      Style: Points
-      Size (Pixels): 3
-      Color Transformer: FlatColor
-      Color: 0; 170; 255
-      Alpha: 0.8
-      Position Transformer: XYZ
+      Use Fixed Frame: true
+      Use rainbow: true
       Value: true
-    - Class: rviz_default_plugins/PointCloud2
+    - Alpha: 0.8999999761581421
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz_default_plugins/PointCloud2
+      Color: 255; 255; 0
+      Color Transformer: FlatColor
+      Decay Time: 0
       Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
       Name: Scan Features (edges)
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.07999999821186066
+      Style: Spheres
       Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /olive/debug/scan_edges
-      Style: Spheres
-      Size (m): 0.08
-      Color Transformer: FlatColor
-      Color: 255; 255; 0
-      Alpha: 0.9
-      Position Transformer: XYZ
+      Use Fixed Frame: true
+      Use rainbow: true
       Value: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
       Name: Fiducials
+      Namespaces:
+        anchor_rays: true
+        fiducial_labels: true
+        fiducials: true
+        landmark_error: true
+        landmark_estimates: true
       Topic:
         Depth: 5
         Durability Policy: Transient Local
@@ -206,21 +404,53 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /olive/debug/fiducials
       Value: true
-    - Class: rviz_default_plugins/PointCloud2
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 1.8739209175109863
+        Min Value: -0.08035425841808319
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz_default_plugins/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: AxisColor
+      Decay Time: 0
       Enabled: false
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
       Name: Raw LiDAR
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 1
+      Size (m): 0.009999999776482582
+      Style: Points
       Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
         Value: /lidar/points
-      Style: Points
-      Size (Pixels): 1
-      Color Transformer: AxisColor
-      Axis: Z
-      Position Transformer: XYZ
+      Use Fixed Frame: true
+      Use rainbow: true
       Value: false
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: VO Camera (features)
+      Normalize Range: true
+      Topic:
+        Depth: 2
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /olive/debug/vo_image
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 35; 38; 41
@@ -231,26 +461,62 @@ Visualization Manager:
     - Class: rviz_default_plugins/MoveCamera
     - Class: rviz_default_plugins/FocusCamera
     - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
     - Class: rviz_default_plugins/SetInitialPose
+      Covariance x: 0.25
+      Covariance y: 0.25
+      Covariance yaw: 0.06853891909122467
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: initialpose
     - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: goal_pose
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
   Value: true
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Name: Current View
-      Distance: 18
+      Distance: 20.495988845825195
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
       Focal Point:
         X: 0
         Y: 0
         Z: 0
-      Pitch: 1.2
-      Yaw: 0.785
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05000000074505806
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.009999999776482582
+      Pitch: 0.470000684261322
       Target Frame: <Fixed Frame>
+      Value: Orbit (rviz_default_plugins)
+      Yaw: 5.598167896270752
     Saved: ~
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 900
-  Width: 1400
-  X: 60
-  Y: 60
+  Height: 1992
+  Hide Left Dock: false
+  Hide Right Dock: false
+  QMainWindow State: 000000ff00000000fd00000001000000000000030f00000728fc0200000003fb000000280056004f002000430061006d006500720061002000280066006500610074007500720065007300290300000a1a000001360000030f000002bdfb000000100044006900730070006c0061007900730100000070000004f20000018600fffffffb0000000a00560069006500770073010000056e0000022a0000013800ffffff00000a350000072800000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  VO Camera (features):
+    collapsed: false
+  Views:
+    collapsed: false
+  Width: 3408
+  X: 0
+  Y: 64
