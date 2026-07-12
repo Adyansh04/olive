@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 namespace olive
 {
@@ -88,8 +89,8 @@ void FeatureExtractor::markUnusablePoints(const ScanImage& scan)
 
 void FeatureExtractor::selectFeatures(const ScanImage& scan, FeatureClouds& out)
 {
-    const int window    = config_.curvature_window;
-    const int num_rings = static_cast<int>(scan.ring_start.size());
+    const int  window    = config_.curvature_window;
+    const auto num_rings = std::ssize(scan.ring_start);
 
     for (int ring = 0; ring < num_rings; ++ring)
     {
@@ -117,7 +118,7 @@ void FeatureExtractor::selectFeatures(const ScanImage& scan, FeatureClouds& out)
             // Edges: highest curvature first, spaced out by suppressing
             // azimuth-adjacent neighbors after every pick.
             int edges_picked = 0;
-            for (int k = static_cast<int>(sortable_.size()) - 1; k >= 0; --k)
+            for (auto k = std::ssize(sortable_) - 1; k >= 0; --k)
             {
                 const int ind = sortable_[k].second;
                 if (picked_[ind] != 0 || curvature_[ind] <= config_.edge_threshold)

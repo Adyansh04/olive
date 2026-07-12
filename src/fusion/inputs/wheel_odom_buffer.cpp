@@ -1,5 +1,7 @@
 #include "olive/fusion/inputs/wheel_odom_buffer.hpp"
 
+#include <numeric>
+
 namespace olive
 {
 
@@ -31,8 +33,8 @@ std::optional<gtsam::Pose3> WheelOdomBuffer::poseAt(double time) const
 std::optional<gtsam::Pose3> WheelOdomBuffer::relativePose(double t0, double t1) const
 {
     const std::lock_guard<std::mutex> lock(mutex_);
-    const auto                  pose0 = interpolate(t0);
-    const auto                  pose1 = interpolate(t1);
+    const auto                        pose0 = interpolate(t0);
+    const auto                        pose1 = interpolate(t1);
     if (!pose0 || !pose1)
         return std::nullopt;
     return pose0->between(*pose1);
@@ -69,7 +71,7 @@ std::optional<gtsam::Pose3> WheelOdomBuffer::interpolate(double time) const
     size_t hi = samples_.size() - 1;
     while (hi - lo > 1)
     {
-        const size_t mid = (lo + hi) / 2;
+        const size_t mid = std::midpoint(lo, hi);
         if (samples_[mid].first <= time)
         {
             lo = mid;

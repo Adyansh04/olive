@@ -2,6 +2,7 @@
 // odom-frame stream (odomTick extension + LiDAR-dropout coasting), and
 // /diagnostics.
 
+#include <format>
 #include <string>
 
 #include "olive/common/gtsam_conversions.hpp"
@@ -56,8 +57,7 @@ void FusionNode::publishDiagnostics()
             diagnostic_msgs::msg::KeyValue eig;
             eig.key            = "constraint_eigenvalues";
             const auto& values = scan_matcher_->constraintEigenvalues();
-            eig.value          = std::to_string(values(0)) + " " + std::to_string(values(1)) + " " +
-                        std::to_string(values(2));
+            eig.value          = std::format("{} {} {}", values(0), values(1), values(2));
             diag.values.push_back(eig);
         }
         array.status.push_back(diag);

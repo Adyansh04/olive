@@ -3,6 +3,7 @@
 #include <pcl/common/transforms.h>
 
 #include <cmath>
+#include <iterator>
 #include <numbers>
 #include <vector>
 
@@ -57,7 +58,7 @@ bool ScanMatcher::align(const FeatureClouds& features, MatcherPose& pose)
             addEdgeResiduals(*features.edge, transform);
         addPlanarResiduals(*features.planar, transform);
 
-        if (static_cast<int>(residual_points_.size()) < config_.min_correspondences)
+        if (std::ssize(residual_points_) < config_.min_correspondences)
             return false;
 
         if (gaussNewtonStep(pose, iteration))
@@ -231,7 +232,7 @@ bool ScanMatcher::gaussNewtonStep(MatcherPose& pose, int iteration)
     const Eigen::Matrix3f d_pitch = rz * dry * rx;
     const Eigen::Matrix3f d_yaw   = drz * ry * rx;
 
-    const int n = static_cast<int>(residual_points_.size());
+    const auto n = std::ssize(residual_points_);
 
     Eigen::Matrix<float, Eigen::Dynamic, 6> jacobian(n, 6);
     Eigen::VectorXf                         residual(n);

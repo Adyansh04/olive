@@ -3,6 +3,8 @@
 #include <pcl/common/transforms.h>
 #include <pcl_conversions/pcl_conversions.h>
 
+#include <format>
+
 #include "olive/common/gtsam_conversions.hpp"
 #include "olive/fusion/fusion_node.hpp"
 #include "olive/fusion/graph/pose_graph.hpp"
@@ -155,7 +157,7 @@ void FusionNode::publishFiducialDebug(double stamp)
         visualization_msgs::msg::Marker label = sphere;
         label.ns                              = "fiducial_labels";
         label.type                            = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
-        label.text                            = "id " + std::to_string(id);
+        label.text                            = std::format("id {}", id);
         label.pose.position.z += 0.35;
         label.scale.z = 0.25;
         label.color.r = label.color.g = label.color.b = 1.0F;
@@ -248,9 +250,9 @@ void FusionNode::publishFiducialDebug(double stamp)
                 visualization_msgs::msg::Marker label = sphere;
                 label.ns                              = "landmark_labels";
                 label.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
-                label.text = undecoded ? "track " + std::to_string(id - UNDECODED_LANDMARK_BASE) +
-                                             " (free)" :
-                                         "id " + std::to_string(id) + " (free)";
+                label.text = undecoded ?
+                                 std::format("track {} (free)", id - UNDECODED_LANDMARK_BASE) :
+                                 std::format("id {} (free)", id);
                 label.pose.position.z += 0.3;
                 label.scale.z = 0.2;
                 label.color.r = label.color.g = label.color.b = 1.0F;

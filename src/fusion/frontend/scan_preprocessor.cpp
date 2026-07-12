@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <iterator>
 #include <numbers>
 #include <optional>
 #include <sensor_msgs/point_cloud2_iterator.hpp>

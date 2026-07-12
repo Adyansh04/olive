@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cv_bridge/cv_bridge.hpp>
+#include <iterator>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core/utility.hpp>
 #include <opencv2/imgproc.hpp>
@@ -175,7 +176,7 @@ void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr&
     // a keyframe lingering until it is older than the wheel buffer, after which
     // wheelDistance() can never resolve scale and VO wedges forever. Force a fresh
     // keyframe well within the wheel history so it always recovers.
-    if (keyframe_stamp_ < 0.0 || static_cast<int>(keyframe_features_.size()) < min_tracked_ ||
+    if (keyframe_stamp_ < 0.0 || std::ssize(keyframe_features_) < min_tracked_ ||
         (stamp - keyframe_stamp_) > max_keyframe_age_)
     {
         adoptKeyframe(gray, stamp);
@@ -200,7 +201,7 @@ void VisualOdometryNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr&
         parallax += cv::norm(tracked[i] - keyframe_features_[i]);
     }
 
-    if (static_cast<int>(p0.size()) < min_tracked_)
+    if (std::ssize(p0) < min_tracked_)
     {
         if (debug_)
         {
