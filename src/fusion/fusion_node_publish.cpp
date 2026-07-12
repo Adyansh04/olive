@@ -5,7 +5,10 @@
 #include <string>
 
 #include "olive/common/gtsam_conversions.hpp"
+#include "olive/fusion/frontend/scan_matcher.hpp"
 #include "olive/fusion/fusion_node.hpp"
+#include "olive/fusion/graph/keyframe_map.hpp"
+#include "olive/fusion/graph/pose_graph.hpp"
 
 namespace olive
 {

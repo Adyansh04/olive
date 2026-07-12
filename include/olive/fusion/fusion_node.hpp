@@ -11,6 +11,7 @@
 #ifndef OLIVE_FUSION_FUSION_NODE_HPP_
 #define OLIVE_FUSION_FUSION_NODE_HPP_
 
+#include <gtsam/geometry/Pose3.h>
 #include <tf2_ros/transform_broadcaster.h>
 
 #include <diagnostic_msgs/msg/diagnostic_array.hpp>
@@ -30,20 +31,30 @@
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <whycode_vision/msg/why_code_pose_array.hpp>
 
-#include "olive/fusion/frontend/feature_extractor.hpp"
-#include "olive/fusion/frontend/scan_matcher.hpp"
-#include "olive/fusion/frontend/scan_preprocessor.hpp"
 #include "olive/fusion/fusion_types.hpp"
-#include "olive/fusion/graph/keyframe_map.hpp"
-#include "olive/fusion/graph/loop_detector.hpp"
-#include "olive/fusion/graph/pose_graph.hpp"
 #include "olive/fusion/health_monitor.hpp"
 #include "olive/fusion/inputs/imu_buffer.hpp"
-#include "olive/fusion/inputs/marker_gate.hpp"
 #include "olive/fusion/inputs/wheel_odom_buffer.hpp"
+
+// Compile firewall: the heavy pipeline components (GTSAM iSAM2, PCL
+// kdtree/voxelgrid) are held by pointer and only their definitions' TUs
+// include them. The out-of-line destructor makes the forward declarations
+// sufficient here.
+namespace gtsam
+{
+class PreintegratedCombinedMeasurements;
+}  // namespace gtsam
 
 namespace olive
 {
+
+class ScanPreprocessor;
+class FeatureExtractor;
+class ScanMatcher;
+class KeyframeMap;
+class PoseGraph;
+class MarkerGate;
+class LoopDetector;
 
 class FusionNode : public rclcpp_lifecycle::LifecycleNode
 {
@@ -52,6 +63,7 @@ public:
         rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
     explicit FusionNode(const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
+    ~FusionNode() override;  // out-of-line: unique_ptr members of forward-declared types
 
     CallbackReturn on_configure(const rclcpp_lifecycle::State& state) override;
     CallbackReturn on_activate(const rclcpp_lifecycle::State& state) override;

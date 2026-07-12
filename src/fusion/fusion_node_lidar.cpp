@@ -1,11 +1,20 @@
 // FusionNode — the scan hot path: pose prediction, preprocess/deskew/match,
 // keyframe decision, factor insertion (LiDAR/wheel/VO/IMU/markers), iSAM2
 // optimization, correction refresh, and loop closure.
+#include <gtsam/navigation/CombinedImuFactor.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 
+#include "olive/fusion/frontend/feature_extractor.hpp"
+#include "olive/fusion/frontend/scan_matcher.hpp"
+#include "olive/fusion/frontend/scan_preprocessor.hpp"
 #include "olive/fusion/fusion_node.hpp"
+#include "olive/fusion/graph/keyframe_map.hpp"
+#include "olive/fusion/graph/loop_detector.hpp"
+#include "olive/fusion/graph/pose_graph.hpp"
+#include "olive/fusion/inputs/marker_gate.hpp"
 
 namespace olive
 {

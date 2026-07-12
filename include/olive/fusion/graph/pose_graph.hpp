@@ -20,13 +20,14 @@
 #include <utility>
 #include <vector>
 
+#include "olive/fusion/fusion_types.hpp"
+
 namespace olive
 {
 
 /**
  * @brief Noise sigmas for a 6-DoF factor, ROS order [x, y, z, roll, pitch, yaw]
  */
-using FactorSigmas = std::array<double, 6>;
 
 /**
  * @brief Owns the incremental factor graph over keyframe poses X(0..n).

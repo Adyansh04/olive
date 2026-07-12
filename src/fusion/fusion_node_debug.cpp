@@ -5,6 +5,8 @@
 
 #include "olive/common/gtsam_conversions.hpp"
 #include "olive/fusion/fusion_node.hpp"
+#include "olive/fusion/graph/pose_graph.hpp"
+#include "olive/fusion/inputs/marker_gate.hpp"
 
 namespace olive
 {

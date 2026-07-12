@@ -10,11 +10,15 @@
 #include <pcl/point_types.h>
 
 #include <Eigen/Dense>
+#include <array>
 #include <string>
 #include <vector>
 
 namespace olive
 {
+
+/// Per-factor noise sigmas: [roll, pitch, yaw, x, y, z]
+using FactorSigmas = std::array<double, 6>;
 
 using CloudPoint = pcl::PointXYZI;
 using Cloud      = pcl::PointCloud<CloudPoint>;

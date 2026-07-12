@@ -1,6 +1,7 @@
 // FusionNode — bring-up/teardown: parameter declaration + loading, lifecycle
 // transitions, and TF-sourced extrinsics. Runtime paths live in the sibling
 // fusion_node_*.cpp translation units.
+#include <gtsam/navigation/CombinedImuFactor.h>
 #include <pcl/common/transforms.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
@@ -12,7 +13,14 @@
 #include <thread>
 
 #include "olive/common/gtsam_conversions.hpp"
+#include "olive/fusion/frontend/feature_extractor.hpp"
+#include "olive/fusion/frontend/scan_matcher.hpp"
+#include "olive/fusion/frontend/scan_preprocessor.hpp"
 #include "olive/fusion/fusion_node.hpp"
+#include "olive/fusion/graph/keyframe_map.hpp"
+#include "olive/fusion/graph/loop_detector.hpp"
+#include "olive/fusion/graph/pose_graph.hpp"
+#include "olive/fusion/inputs/marker_gate.hpp"
 
 namespace olive
 {
@@ -72,6 +80,10 @@ FusionNode::FusionNode(const rclcpp::NodeOptions& options)
         });
     }
 }
+
+// Out-of-line so unique_ptr members of forward-declared components destroy
+// where their definitions are visible (compile-firewall header).
+FusionNode::~FusionNode() = default;
 
 void FusionNode::declareParameters()
 {
@@ -636,7 +648,7 @@ void FusionNode::loadExtrinsicsFromTf()
     // on_configure runs on this node's executor thread, so the listener must
     // spin its own internal node (spin_thread=true, the default) or the
     // static transforms could never be received while we wait here.
-    tf2_ros::Buffer            buffer(get_clock());
+    tf2_ros::Buffer                  buffer(get_clock());
     const tf2_ros::TransformListener listener(buffer);
 
     const auto deadline = std::chrono::steady_clock::now() +
