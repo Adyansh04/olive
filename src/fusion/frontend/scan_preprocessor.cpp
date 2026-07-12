@@ -101,7 +101,7 @@ public:
                                std::vector<std::string>{ mode };
         for (const auto& name : candidates)
         {
-            ScalarReader reader(msg, name);
+            const ScalarReader reader(msg, name);
             if (!reader.found())
                 continue;
             reader_.emplace(reader);
@@ -224,7 +224,7 @@ bool ScanPreprocessor::processUnorganized(const sensor_msgs::msg::PointCloud2& m
         return false;
 
     const std::string ring_name = config_.ring_field == "auto" ? "ring" : config_.ring_field;
-    ScalarReader      ring_reader(msg, ring_name);
+    const ScalarReader ring_reader(msg, ring_name);
     if (!ring_reader.found())
         return false;  // cannot recover scan lines without a ring field
 

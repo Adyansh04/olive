@@ -73,7 +73,7 @@ std::optional<LoopClosure> LoopDetector::detect(const KeyframeMap& map, size_t c
         return std::nullopt;
 
     // Submap: the candidate's cloud-bearing neighborhood at optimized poses.
-    Cloud::Ptr   target(new Cloud);
+    const Cloud::Ptr target(new Cloud);
     const size_t lo = *candidate >= static_cast<size_t>(config_.submap_half_width) ?
                           *candidate - config_.submap_half_width :
                           0;
@@ -90,14 +90,14 @@ std::optional<LoopClosure> LoopDetector::detect(const KeyframeMap& map, size_t c
     if (target->size() < 100)
         return std::nullopt;
 
-    Cloud::Ptr                 target_filtered(new Cloud);
+    const Cloud::Ptr           target_filtered(new Cloud);
     pcl::VoxelGrid<CloudPoint> filter;
     filter.setLeafSize(config_.submap_leaf_size, config_.submap_leaf_size, config_.submap_leaf_size);
     filter.setInputCloud(target);
     filter.filter(*target_filtered);
 
     // Source: the current keyframe's features at its current pose estimate.
-    Cloud::Ptr source(new Cloud);
+    const Cloud::Ptr source(new Cloud);
     appendTransformed(map.at(current_index), *source);
 
     pcl::IterativeClosestPoint<CloudPoint, CloudPoint> icp;

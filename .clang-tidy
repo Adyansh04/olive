@@ -1,0 +1,57 @@
+# CLI clang-tidy config for the olive package. Mirrors the check set in the
+# workspace .clangd (which drives the in-editor clangd diagnostics) so
+# `clang-tidy -p ../build/olive <file>` reports the same things the IDE does.
+# Start from a clean slate (-*) and enable exactly the intended checks.
+---
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  cppcoreguidelines-prefer-member-initializer,
+  cppcoreguidelines-pro-type-member-init,
+  llvm-namespace-comment,
+  misc-const-correctness,
+  misc-unused-parameters,
+  modernize-avoid-bind,
+  modernize-loop-convert,
+  modernize-make-shared,
+  modernize-make-unique,
+  modernize-redundant-void-arg,
+  modernize-use-default-member-init,
+  modernize-use-emplace,
+  modernize-use-equals-default,
+  modernize-use-equals-delete,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-std-numbers,
+  readability-braces-around-statements,
+  readability-identifier-naming,
+  readability-named-parameter,
+  readability-redundant-smartptr-get,
+  readability-redundant-string-cstr,
+  readability-simplify-boolean-expr,
+  readability-static-definition-in-anonymous-namespace,
+  -bugprone-easily-swappable-parameters,
+  -performance-enum-size
+WarningsAsErrors: ''
+# Only report diagnostics inside olive's own headers, not GTSAM/PCL/ROS headers.
+HeaderFilterRegex: 'olive/include/olive/.*'
+FormatStyle: file
+CheckOptions:
+  llvm-namespace-comment.ShortNamespaceLines: '10'
+  llvm-namespace-comment.SpacesBeforeComments: '2'
+  misc-unused-parameters.StrictMode: '1'
+  readability-braces-around-statements.ShortStatementLines: '2'
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.EnumCase: CamelCase
+  readability-identifier-naming.UnionCase: CamelCase
+  readability-identifier-naming.FunctionCase: camelBack
+  readability-identifier-naming.MethodCase: camelBack
+  readability-identifier-naming.VariableCase: lower_case
+  readability-identifier-naming.ProtectedMemberSuffix: _
+  readability-identifier-naming.PrivateMemberSuffix: _
+  readability-identifier-naming.EnumConstantCase: UPPER_CASE
+  readability-identifier-naming.StaticVariableCasePrefix: s_
+  readability-identifier-naming.StaticConstantCase: UPPER_CASE
+  readability-identifier-naming.GlobalConstantCase: UPPER_CASE
+  readability-identifier-naming.ClassConstantCase: UPPER_CASE

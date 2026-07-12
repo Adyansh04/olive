@@ -82,21 +82,25 @@ void KeyframeMap::enforceCloudBudget(double now)
     auto owns_cell = [&](size_t index) {
         if (config_.cloud_voxel <= 0.0)
             return true;  // voxel thinning disabled: everything "owns"
-        return claimed_key_.count(index) > 0;
+        return claimed_key_.contains(index);
     };
 
     // Pass 1: voxel thinning — drop clouds of non-owners once they age out
     // of the recent window.
     std::vector<size_t> kept;
     kept.reserve(cloud_bearing_.size());
-    for (size_t index : cloud_bearing_)
+    for (const size_t index : cloud_bearing_)
     {
         if (!keyframes_[index].edge)
             continue;  // already evicted elsewhere
         if (!is_protected(index) && !owns_cell(index))
+        {
             evict(index);
+        }
         else
+        {
             kept.push_back(index);
+        }
     }
     cloud_bearing_.swap(kept);
 
@@ -105,7 +109,7 @@ void KeyframeMap::enforceCloudBudget(double now)
         return;
 
     std::vector<size_t> candidates;
-    for (size_t index : cloud_bearing_)
+    for (const size_t index : cloud_bearing_)
     {
         if (!is_protected(index))
             candidates.push_back(index);
@@ -115,19 +119,15 @@ void KeyframeMap::enforceCloudBudget(double now)
     });
 
     size_t to_evict = cloud_bearing_.size() - config_.max_cloud_keyframes;
-    for (size_t index : candidates)
+    for (const size_t index : candidates)
     {
         if (to_evict == 0)
             break;
         evict(index);
         --to_evict;
     }
-    cloud_bearing_.erase(
-        std::remove_if(
-            cloud_bearing_.begin(),
-            cloud_bearing_.end(),
-            [this](size_t index) { return keyframes_[index].edge == nullptr; }),
-        cloud_bearing_.end());
+    std::erase_if(
+        cloud_bearing_, [this](size_t index) { return keyframes_[index].edge == nullptr; });
 }
 
 bool KeyframeMap::shouldAddKeyframe(const gtsam::Pose3& pose) const
@@ -170,7 +170,7 @@ void KeyframeMap::buildLocalMap(
     position_tree.radiusSearch(query, config_.search_radius, indices, sq_distances);
 
     std::vector<char> selected(keyframes_.size(), 0);
-    for (int index : indices)
+    for (const int index : indices)
         selected[static_cast<size_t>(index)] = 1;
 
     // ... plus everything recent, so tight turns keep dense support.
@@ -192,8 +192,8 @@ void KeyframeMap::buildLocalMap(
         auto cached = transformed_cache_.find(i);
         if (cached == transformed_cache_.end())
         {
-            Cloud::Ptr            edge_world(new Cloud);
-            Cloud::Ptr            planar_world(new Cloud);
+            const Cloud::Ptr      edge_world(new Cloud);
+            const Cloud::Ptr      planar_world(new Cloud);
             const Eigen::Affine3f transform(keyframes_[i].pose.matrix().cast<float>());
             pcl::transformPointCloud(*keyframes_[i].edge, *edge_world, transform);
             pcl::transformPointCloud(*keyframes_[i].planar, *planar_world, transform);

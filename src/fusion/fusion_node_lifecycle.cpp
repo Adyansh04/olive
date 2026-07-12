@@ -28,19 +28,33 @@ FusionNode::FusionNode(const rclcpp::NodeOptions& options)
             for (const rclcpp::Parameter& p : params)
             {
                 if (p.get_name() == "publish_debug")
+                {
                     debug_enabled_ = p.as_bool();
+                }
                 else if (p.get_name() == "debug_path")
+                {
                     debug_path_ = p.as_bool();
+                }
                 else if (p.get_name() == "debug_keyframes")
+                {
                     debug_keyframes_ = p.as_bool();
+                }
                 else if (p.get_name() == "debug_local_map")
+                {
                     debug_local_map_ = p.as_bool();
+                }
                 else if (p.get_name() == "debug_scan_features")
+                {
                     debug_scan_features_ = p.as_bool();
+                }
                 else if (p.get_name() == "debug_fiducials")
+                {
                     debug_fiducials_ = p.as_bool();
+                }
                 else if (p.get_name() == "debug_imu_state")
+                {
                     debug_imu_state_ = p.as_bool();
+                }
             }
             rcl_interfaces::msg::SetParametersResult result;
             result.successful = true;
@@ -523,6 +537,7 @@ FusionNode::CallbackReturn FusionNode::on_activate(const rclcpp_lifecycle::State
         rclcpp::SensorDataQoS().keep_last(50),
         [this](nav_msgs::msg::Odometry::SharedPtr msg) { wheelOdomCallback(msg); });
     if (use_vo_)
+    {
         vo_sub_ = create_subscription<nav_msgs::msg::Odometry>(
             vo_topic_,
             rclcpp::QoS(10),
@@ -532,20 +547,27 @@ FusionNode::CallbackReturn FusionNode::on_activate(const rclcpp_lifecycle::State
                 vo_buffer_.push(stamp, gtsam_conversions::toGtsamPose(msg->pose.pose));
                 health_monitor_.beat("vo", stamp);
             });
+    }
     if (use_markers_)
+    {
         marker_sub_ = create_subscription<whycode_vision::msg::WhyCodePoseArray>(
             marker_topic_,
             rclcpp::QoS(10),
             [this](whycode_vision::msg::WhyCodePoseArray::SharedPtr msg) { markerCallback(msg); });
+    }
 
     if (gyro_bias_reestimate_ && imu_preintegration_)
+    {
         RCLCPP_WARN(
             get_logger(),
             "gyro_bias_reestimate is redundant with imu_preintegration (the graph estimates "
             "bias online) - skipping the stationary EMA timer");
+    }
     else if (gyro_bias_reestimate_)
+    {
         bias_reestimate_timer_ =
             create_wall_timer(std::chrono::seconds(1), [this]() { reestimateGyroBias(); });
+    }
 
     diagnostics_timer_ = create_wall_timer(
         std::chrono::duration<double>(get_parameter("diagnostics_period_s").as_double()),
@@ -554,9 +576,11 @@ FusionNode::CallbackReturn FusionNode::on_activate(const rclcpp_lifecycle::State
     // smooth rate when this node owns odom->base, else the legacy 5 Hz coast.
     const double tick_hz = publish_odom_tf_ ? smooth_odom_rate_hz_ : 5.0;
     if (publish_odom_tf_ || coast_on_dropout_)
+    {
         odom_timer_ = create_wall_timer(
             std::chrono::duration<double>(1.0 / std::max(1.0, tick_hz)),
             [this]() { odomTick(); });
+    }
 
     RCLCPP_INFO(get_logger(), "Activated");
     return CallbackReturn::SUCCESS;
@@ -613,7 +637,7 @@ void FusionNode::loadExtrinsicsFromTf()
     // spin its own internal node (spin_thread=true, the default) or the
     // static transforms could never be received while we wait here.
     tf2_ros::Buffer            buffer(get_clock());
-    tf2_ros::TransformListener listener(buffer);
+    const tf2_ros::TransformListener listener(buffer);
 
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::duration_cast<std::chrono::steady_clock::duration>(

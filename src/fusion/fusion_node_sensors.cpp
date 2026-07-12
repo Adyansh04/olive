@@ -78,23 +78,29 @@ void FusionNode::handleImuInit(double stamp)
     // Sanity checks that catch the classic driver misconfigurations.
     const double accel_norm = stats.accel_mean.norm();
     if (std::abs(accel_norm - constants::GRAVITY) > 0.2 * constants::GRAVITY)
+    {
         RCLCPP_WARN(
             get_logger(),
             "IMU init: |accel| = %.2f m/s^2, expected ~9.8 - check units (g vs m/s^2)",
             accel_norm);
+    }
     if (stats.gyro_mean.norm() > 0.05)
+    {
         RCLCPP_WARN(
             get_logger(),
             "IMU init: gyro bias %.4f rad/s is unusually large - check units (deg/s vs rad/s)",
             stats.gyro_mean.norm());
+    }
     const double tilt =
         std::acos(std::clamp(stats.accel_mean.normalized().z(), -1.0, 1.0)) * constants::RAD_TO_DEG;
     if (tilt > 5.0)
+    {
         RCLCPP_WARN(
             get_logger(),
             "IMU init: gravity is %.1f deg off the base +z axis - check imu_rpy mounting "
             "rotation (or the robot is on a slope)",
             tilt);
+    }
 
     RCLCPP_INFO(
         get_logger(),

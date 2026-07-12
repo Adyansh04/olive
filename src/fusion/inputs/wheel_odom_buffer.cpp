@@ -9,13 +9,13 @@ WheelOdomBuffer::WheelOdomBuffer(double history_seconds)
 
 void WheelOdomBuffer::setInterpolationSlack(double seconds)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
     slack_seconds_ = seconds;
 }
 
 void WheelOdomBuffer::push(double timestamp, const gtsam::Pose3& pose)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
     samples_.emplace_back(timestamp, pose);
     const double cutoff = timestamp - history_seconds_;
     while (!samples_.empty() && samples_.front().first < cutoff)
@@ -24,13 +24,13 @@ void WheelOdomBuffer::push(double timestamp, const gtsam::Pose3& pose)
 
 std::optional<gtsam::Pose3> WheelOdomBuffer::poseAt(double time) const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
     return interpolate(time);
 }
 
 std::optional<gtsam::Pose3> WheelOdomBuffer::relativePose(double t0, double t1) const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
     const auto                  pose0 = interpolate(t0);
     const auto                  pose1 = interpolate(t1);
     if (!pose0 || !pose1)
@@ -40,13 +40,13 @@ std::optional<gtsam::Pose3> WheelOdomBuffer::relativePose(double t0, double t1) 
 
 bool WheelOdomBuffer::hasData() const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
     return !samples_.empty();
 }
 
 double WheelOdomBuffer::latestStamp() const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
     return samples_.empty() ? -1.0 : samples_.back().first;
 }
 
@@ -71,9 +71,13 @@ std::optional<gtsam::Pose3> WheelOdomBuffer::interpolate(double time) const
     {
         const size_t mid = (lo + hi) / 2;
         if (samples_[mid].first <= time)
+        {
             lo = mid;
+        }
         else
+        {
             hi = mid;
+        }
     }
 
     const double span  = samples_[hi].first - samples_[lo].first;

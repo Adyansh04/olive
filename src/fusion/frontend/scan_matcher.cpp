@@ -260,7 +260,7 @@ bool ScanMatcher::gaussNewtonStep(MatcherPose& pose, int iteration)
         const Eigen::SelfAdjointEigenSolver<Eigen::Matrix<float, 6, 6>> eig(jtj);
         eigenvalues_ = eig.eigenvalues();
 
-        Eigen::Matrix<float, 6, 6> eigenvectors = eig.eigenvectors().transpose();
+        const Eigen::Matrix<float, 6, 6> eigenvectors = eig.eigenvectors().transpose();
         Eigen::Matrix<float, 6, 6> constrained  = eigenvectors;
         is_degenerate_                          = false;
         for (int i = 0; i < 6; ++i)

@@ -116,7 +116,7 @@ void VisualOdometryNode::wheelOdomCallback(const nav_msgs::msg::Odometry::Shared
 {
     const double stamp =
         static_cast<double>(msg->header.stamp.sec) + 1e-9 * msg->header.stamp.nanosec;
-    std::lock_guard<std::mutex> lock(wheel_mutex_);
+    const std::lock_guard<std::mutex> lock(wheel_mutex_);
     wheel_samples_.push_back({ stamp, msg->pose.pose.position.x, msg->pose.pose.position.y });
     while (!wheel_samples_.empty() && wheel_samples_.front()[0] < stamp - 30.0)
         wheel_samples_.pop_front();
@@ -124,7 +124,7 @@ void VisualOdometryNode::wheelOdomCallback(const nav_msgs::msg::Odometry::Shared
 
 std::optional<double> VisualOdometryNode::wheelDistance(double t0, double t1) const
 {
-    std::lock_guard<std::mutex> lock(wheel_mutex_);
+    const std::lock_guard<std::mutex> lock(wheel_mutex_);
     if (wheel_samples_.size() < 2)
         return std::nullopt;
 

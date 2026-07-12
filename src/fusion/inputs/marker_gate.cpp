@@ -16,18 +16,24 @@ bool MarkerGate::push(
     bool                 id_valid,
     const gtsam::Point3& position_in_camera)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
 
     // Acceptance class decides the landmark key. Surveyed ids always pass;
     // decoded-unknown and undecoded detections pass only when their accept
     // flag is on (they become free landmarks, never world anchors).
     int64_t landmark_key_id = -1;
-    if (id_valid && config_.known_ids.count(whycode_id) > 0)
+    if (id_valid && config_.known_ids.contains(whycode_id))
+    {
         landmark_key_id = whycode_id;
+    }
     else if (id_valid && config_.accept_unknown_ids)
+    {
         landmark_key_id = whycode_id;
+    }
     else if (!id_valid && config_.accept_undecoded_ids)
+    {
         landmark_key_id = UNDECODED_LANDMARK_BASE + tracking_id;
+    }
 
     if (landmark_key_id < 0)
     {
@@ -55,16 +61,20 @@ bool MarkerGate::push(
 
 std::vector<MarkerObservation> MarkerGate::collectNear(double stamp, double window)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
 
     std::vector<MarkerObservation> result;
     std::deque<MarkerObservation>  kept;
     for (const MarkerObservation& obs : accepted_)
     {
         if (std::abs(obs.stamp - stamp) <= window)
+        {
             result.push_back(obs);
+        }
         else if (obs.stamp > stamp)
+        {
             kept.push_back(obs);  // future observations stay for the next keyframe
+        }
     }
     accepted_.swap(kept);
 

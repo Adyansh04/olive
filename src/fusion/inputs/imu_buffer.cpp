@@ -25,25 +25,25 @@ ImuBuffer::ImuBuffer(double history_seconds)
 
 void ImuBuffer::setMountingRotation(const Eigen::Quaterniond& base_from_imu)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
     base_from_imu_ = base_from_imu.normalized();
 }
 
 void ImuBuffer::setGyroBias(const Eigen::Vector3d& bias)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
     gyro_bias_ = bias;
 }
 
 Eigen::Vector3d ImuBuffer::gyroBias() const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
     return gyro_bias_;
 }
 
 void ImuBuffer::push(const ImuData& sample)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
 
     // Store in BASE axes so every consumer (prediction, deskew, stationarity
     // checks) sees body rates regardless of how the IMU is mounted.
@@ -63,7 +63,7 @@ Eigen::Quaterniond ImuBuffer::relativeRotation(double t0, double t1) const
     if (t1 <= t0)
         return rotation;
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
 
     double          previous_time = t0;
     Eigen::Vector3d last_rate     = Eigen::Vector3d::Zero();
@@ -93,7 +93,7 @@ Eigen::Quaterniond ImuBuffer::relativeRotation(double t0, double t1) const
 
 Eigen::Vector3d ImuBuffer::rateNear(double time) const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
     if (samples_.empty())
         return Eigen::Vector3d::Zero();
 
@@ -114,7 +114,7 @@ std::vector<Eigen::Quaterniond> ImuBuffer::sampleRotations(double t0, double t1,
     if (n < 1 || t1 <= t0)
         return rotations;
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
 
     const double       dt        = (t1 - t0) / n;
     Eigen::Quaterniond rotation  = Eigen::Quaterniond::Identity();
@@ -148,7 +148,7 @@ std::vector<Eigen::Quaterniond> ImuBuffer::sampleRotations(double t0, double t1,
 
 ImuBuffer::WindowStats ImuBuffer::windowStats(double t0, double t1) const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
 
     WindowStats stats;
     for (const ImuData& sample : samples_)
@@ -178,7 +178,7 @@ ImuBuffer::WindowStats ImuBuffer::windowStats(double t0, double t1) const
 
 std::vector<ImuData> ImuBuffer::samplesBetween(double t0, double t1) const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
 
     std::vector<ImuData> result;
     result.reserve(static_cast<size_t>(std::max(0.0, (t1 - t0) * 250.0)));
@@ -195,7 +195,7 @@ std::vector<ImuData> ImuBuffer::samplesBetween(double t0, double t1) const
 
 bool ImuBuffer::hasData() const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    const std::lock_guard<std::mutex> lock(mutex_);
     return !samples_.empty();
 }
 

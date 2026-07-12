@@ -78,9 +78,11 @@ void PoseGraph::addOdometryFactor(
     const size_t            n     = num_keyframes_ - 1;
     gtsam::SharedNoiseModel noise = toNoiseModel(sigmas);
     if (robust)
+    {
         noise = gtsam::noiseModel::Robust::Create(
             gtsam::noiseModel::mEstimator::Cauchy::Create(0.1),
             noise);
+    }
     pending_factors_.add(gtsam::BetweenFactor<gtsam::Pose3>(X(n - 1), X(n), relative, noise));
 }
 
@@ -146,7 +148,7 @@ void PoseGraph::addMarkerObservation(
     const auto   key_index  = static_cast<uint64_t>(landmark_id);
 
     const bool known =
-        landmark_ids_.count(landmark_id) > 0 || pending_landmark_ids_.count(landmark_id) > 0;
+        landmark_ids_.contains(landmark_id) || pending_landmark_ids_.contains(landmark_id);
     if (!known)
     {
         // First sighting: insert the landmark value. The surveyed position is
@@ -157,19 +159,25 @@ void PoseGraph::addMarkerObservation(
         {
             gtsam::Pose3 kf_pose;
             if (pending_values_.exists(X(current_kf)))
+            {
                 kf_pose = pending_values_.at<gtsam::Pose3>(X(current_kf));
+            }
             else if (current_estimate_.exists(X(current_kf)))
+            {
                 kf_pose = current_estimate_.at<gtsam::Pose3>(X(current_kf));
+            }
             initial = kf_pose.compose(base_from_camera).transformFrom(measured_in_camera);
         }
         pending_values_.insert(L(key_index), initial);
         pending_landmark_ids_.insert(landmark_id);
 
         if (surveyed_position)
+        {
             pending_factors_.add(gtsam::PriorFactor<gtsam::Point3>(
                 L(key_index),
                 *surveyed_position,
                 gtsam::noiseModel::Isotropic::Sigma(3, survey_sigma)));
+        }
     }
 
     // Robust kernel: one mis-decoded marker must not yank the trajectory.
@@ -189,11 +197,15 @@ void PoseGraph::addMarkerObservation(
     // stay on the cheap incremental path.
     const auto last_seen = landmark_last_seen_kf_.find(landmark_id);
     if (surveyed_position)
+    {
         has_global_factor_ = true;
+    }
     else if (
         last_seen != landmark_last_seen_kf_.end() &&
         current_kf - last_seen->second >= LANDMARK_REVISIT_GAP)
+    {
         has_global_factor_ = true;
+    }
     // (Not rolled back on FAILED: a stale entry only shifts one revisit-gap
     // decision by a keyframe, which is harmless.)
     landmark_last_seen_kf_[landmark_id] = current_kf;
@@ -370,9 +382,11 @@ std::vector<std::pair<int64_t, gtsam::Point3>> PoseGraph::landmarks() const
     std::vector<std::pair<int64_t, gtsam::Point3>> result;
     result.reserve(landmark_ids_.size());
     for (const int64_t id : landmark_ids_)
+    {
         result.emplace_back(
             id,
             isam_.calculateEstimate<gtsam::Point3>(L(static_cast<uint64_t>(id))));
+    }
     return result;
 }
 

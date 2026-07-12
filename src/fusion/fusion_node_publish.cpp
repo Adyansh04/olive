@@ -92,9 +92,11 @@ void FusionNode::odomTick()
     // next scan increment supersedes this extension.
     gtsam::Pose3 extension = *wheel_relative;
     if (imu_buffer_.hasData())
+    {
         extension = gtsam::Pose3(
             gtsam::Rot3(imu_buffer_.relativeRotation(last_scan_stamp_, wheel_now)),
             extension.translation());
+    }
     const gtsam::Pose3 smooth_now = smooth_pose_ * extension;
     if (publish_odom_tf_)
         publishSmoothOdometry(smooth_now, wheel_now);

@@ -53,11 +53,17 @@ std::vector<HealthMonitor::Status> HealthMonitor::evaluate(double now) const
 
         const bool required = entry.spec.timeout > 0.0;
         if (entry.last_beat < 0.0)
+        {
             status.health = required ? SensorHealth::FAILED : SensorHealth::POOR;
+        }
         else if (required && status.age > entry.spec.timeout)
+        {
             status.health = SensorHealth::FAILED;
+        }
         else
+        {
             status.health = entry.quality;
+        }
 
         result.push_back(status);
     }

@@ -26,8 +26,8 @@ void FusionNode::bootstrapFirstKeyframe(const FeatureClouds& features)
         return;
     }
 
-    Cloud::Ptr edge_copy(new Cloud(*features.edge));
-    Cloud::Ptr planar_copy(new Cloud(*features.planar));
+    const Cloud::Ptr edge_copy(new Cloud(*features.edge));
+    const Cloud::Ptr planar_copy(new Cloud(*features.planar));
     keyframe_map_->add(origin, edge_copy, planar_copy, features.stamp);
 
     last_scan_pose_  = origin;
@@ -159,9 +159,13 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
     last_match_ok_         = scan_matcher_->align(features_, matcher_pose);
     last_match_degenerate_ = scan_matcher_->isDegenerate();
     if (last_match_ok_ && last_match_degenerate_)
+    {
         health_monitor_.flagQuality("lidar", SensorHealth::DEGRADED, "degenerate geometry");
+    }
     else if (!last_match_ok_)
+    {
         health_monitor_.flagQuality("lidar", SensorHealth::POOR, "scan match failed");
+    }
     if (last_match_ok_)
     {
         if (planar_motion_)
@@ -378,11 +382,13 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
                                        std::chrono::steady_clock::now() - optimize_start)
                                        .count();
         if (optimize_ms > optimize_budget_warn_ms_)
+        {
             RCLCPP_WARN(
                 get_logger(),
                 "Graph update took %.1f ms (budget %.0f ms)",
                 optimize_ms,
                 optimize_budget_warn_ms_);
+        }
 
         if (result == PoseGraph::OptimizeResult::FAILED)
         {
@@ -438,8 +444,8 @@ void FusionNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedP
         }
 
         const gtsam::Pose3 optimized = pose_graph_->latestPose();
-        Cloud::Ptr         edge_copy(new Cloud(*features_.edge));
-        Cloud::Ptr         planar_copy(new Cloud(*features_.planar));
+        const Cloud::Ptr   edge_copy(new Cloud(*features_.edge));
+        const Cloud::Ptr   planar_copy(new Cloud(*features_.planar));
         keyframe_map_->add(
             optimized,
             edge_copy,
