@@ -99,16 +99,20 @@ colcon build --symlink-install --packages-select olive --cmake-args \
 
 ### 5. Runtime library resolution
 
-`LD_LIBRARY_PATH` must prefer the source-built libraries (it outranks the
-binaries' RUNPATH; otherwise the apt SSE2 GTSAM is loaded and the process
-crashes). Add after sourcing the workspace:
+With `OLIVE_NATIVE_OPT=ON` the binaries are linked with `DT_RPATH` (via
+`-Wl,--disable-new-dtags`) pointing at the source-built deps, so they load the
+correct GTSAM/PCL **without any `LD_LIBRARY_PATH` setup** — `ros2 launch` /
+`ros2 run` just work from a normally-sourced workspace.
 
-```zsh
-export LD_LIBRARY_PATH=$HOME/olive_ws/deps/gtsam-install/lib:$HOME/olive_ws/deps/pcl-install/lib:$LD_LIBRARY_PATH
-```
+This matters because a sourced ROS workspace puts `/opt/ros/jazzy/lib/x86_64-linux-gnu`
+(where the apt `libgtsam.so.4` lives, same soname as the source build) on
+`LD_LIBRARY_PATH`. The default `DT_RUNPATH` is searched *after* `LD_LIBRARY_PATH`,
+so the apt SSE2 GTSAM would win and corrupt the heap in the AVX2 binary;
+`DT_RPATH` is searched *before* `LD_LIBRARY_PATH`, so the source build wins.
 
-`benchmark/full_stack_replay.sh` does this automatically when the deps dirs
-exist. Verify with `ldd install/olive/lib/olive/fusion_node | grep -E "gtsam|pcl_common"`.
+Verify: `readelf -d install/olive/lib/olive/fusion_node | grep RPATH` and
+`ldd install/olive/lib/olive/fusion_node | grep -E "gtsam|pcl_common"` (both
+should point into `deps/`).
 
 ### Validation
 

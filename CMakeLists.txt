@@ -31,6 +31,12 @@ endif()
 option(OLIVE_NATIVE_OPT "Enable -march=x86-64-v3 (needs source-built deps, see BUILDING.md)" OFF)
 if(OLIVE_NATIVE_OPT)
   add_compile_options(-march=x86-64-v3)
+  # Emit DT_RPATH (searched BEFORE LD_LIBRARY_PATH) instead of the default
+  # DT_RUNPATH (searched after), so the source-built GTSAM on the binary's
+  # rpath wins over the apt GTSAM that a sourced ROS workspace puts on
+  # LD_LIBRARY_PATH (same soname). Without this the AVX2 binary loads the
+  # SSE2 apt GTSAM and the heap corrupts on the first scan.
+  add_link_options(-Wl,--disable-new-dtags)
 endif()
 
 # Faster kNN backend for the scan matcher (the #1 profiled hot zone).
