@@ -23,6 +23,12 @@ if(olive_ipo_supported)
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 endif()
 
+# NOTE: -march (AVX2/FMA) is deliberately NOT offered: TUs compiled at
+# x86-64-v3 corrupt the heap at the prebuilt (SSE2-ABI) GTSAM boundary —
+# every gtsam-linked unit test dies with "double free or corruption", and
+# pinning EIGEN_MAX_ALIGN_BYTES does not fix it. Enabling AVX here would
+# require rebuilding GTSAM (and ideally PCL) from source with matching flags.
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra)
 endif()
