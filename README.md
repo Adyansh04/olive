@@ -5,6 +5,12 @@
 One iSAM2 keyframe graph fuses LiDAR, IMU (tightly coupled), wheel encoders, WhyCode fiducials and monocular visual odometry, with ICP loop closure. It produces both a globally-accurate map-frame pose and a smooth, jump-free odom-frame stream — a drop-in localization backend for Nav2.
 
 <p align="center">
+<img src="media/olive_demo.gif" width="90%" alt="Live RViz view of OLIVE fusing LiDAR, IMU, wheels, camera and fiducial markers over one maze loop">
+</p>
+
+*Live RViz over one maze loop. The **green** arrows/line are the globally-accurate map-frame estimate; the **blue** arrows are the smooth local odometry a controller drives on. **Yellow** (edge) and **cyan** (planar) points are the current LiDAR scan's features, matched against the **orange/grey** accumulated map — watch them stay locked together. When a fiducial sphere flips **grey → green** and fires a green ray, it's being used as an anchor: the green trajectory **snaps** to correct the accumulated drift while the blue local track stays perfectly smooth (the correction goes entirely into `map→odom`), then the sphere settles to **blue**. Bottom-right is the camera with the visual-odometry overlay — **green** = inlier feature tracks, **yellow** = tracking while it builds baseline.*
+
+<p align="center">
 <img src="media/trajectory.png" width="49%" alt="Fused trajectory vs ground truth over 3 maze loops (2.0 cm RMSE)">
 <img src="media/local_vs_wheel.png" width="49%" alt="Smooth local odometry stays tight while raw wheel odometry drifts">
 </p>
