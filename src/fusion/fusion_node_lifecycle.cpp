@@ -90,7 +90,9 @@ void FusionNode::declareParameters()
     declare_parameter("use_markers", true);
     declare_parameter("marker_topic", "/whycode/poses");
     declare_parameter("camera_translation", std::vector<double>{ 0.2, 0.0, 0.06 });
-    declare_parameter("camera_rpy", std::vector<double>{ -M_PI_2, 0.0, -M_PI_2 });
+    declare_parameter(
+        "camera_rpy",
+        std::vector<double>{ -std::numbers::pi / 2.0, 0.0, -std::numbers::pi / 2.0 });
     declare_parameter("marker_position_sigma_m", 0.10);
     declare_parameter("marker_stamp_window_s", 0.25);
     declare_parameter("marker_min_range_m", 0.5);

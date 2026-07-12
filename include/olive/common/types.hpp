@@ -12,6 +12,7 @@
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 #include <cmath>
+#include <numbers>
 #include <string>
 
 namespace olive
@@ -151,15 +152,20 @@ enum class SensorType
  */
 namespace constants
 {
-constexpr double GRAVITY             = 9.81;          ///< Gravity (m/s^2)
-constexpr double DEG_TO_RAD          = M_PI / 180.0;  ///< Degree to radian conversion
-constexpr double RAD_TO_DEG          = 180.0 / M_PI;  ///< Radian to degree conversion
-constexpr double DEFAULT_ODOM_RATE   = 100.0;         ///< Default odometry rate (Hz)
-constexpr double DEFAULT_FUSION_RATE = 10.0;          ///< Default fusion rate (Hz)
-constexpr double DEFAULT_TIME_STEP   = 0.1;           ///< Default time step for calculations (s)
-constexpr double MAX_TIME_DIFF       = 1.0;           ///< Maximum acceptable time difference (s)
-constexpr double MIN_SCALE_FACTOR    = 0.1;           ///< Minimum scale factor for visual odometry
-constexpr double MAX_SCALE_FACTOR    = 10.0;          ///< Maximum scale factor for visual odometry
+// The POSIX macros are replaced by std::numbers everywhere; these asserts pin
+// the swap to the exact same IEEE-754 doubles so fused output cannot move.
+static_assert(std::numbers::pi == M_PI);
+static_assert(std::numbers::pi / 2.0 == M_PI_2);
+
+constexpr double GRAVITY             = 9.81;                      ///< Gravity (m/s^2)
+constexpr double DEG_TO_RAD          = std::numbers::pi / 180.0;  ///< Degree to radian conversion
+constexpr double RAD_TO_DEG          = 180.0 / std::numbers::pi;  ///< Radian to degree conversion
+constexpr double DEFAULT_ODOM_RATE   = 100.0;                     ///< Default odometry rate (Hz)
+constexpr double DEFAULT_FUSION_RATE = 10.0;                      ///< Default fusion rate (Hz)
+constexpr double DEFAULT_TIME_STEP   = 0.1;   ///< Default time step for calculations (s)
+constexpr double MAX_TIME_DIFF       = 1.0;   ///< Maximum acceptable time difference (s)
+constexpr double MIN_SCALE_FACTOR    = 0.1;   ///< Minimum scale factor for visual odometry
+constexpr double MAX_SCALE_FACTOR    = 10.0;  ///< Maximum scale factor for visual odometry
 }  // namespace constants
 
 }  // namespace olive

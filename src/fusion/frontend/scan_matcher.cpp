@@ -3,6 +3,7 @@
 #include <pcl/common/transforms.h>
 
 #include <cmath>
+#include <numbers>
 #include <vector>
 
 namespace olive
@@ -288,9 +289,9 @@ bool ScanMatcher::gaussNewtonStep(MatcherPose& pose, int iteration)
     pose.z += update(5);
 
     const float delta_rotation = std::sqrt(
-        std::pow(update(0) * 180.0F / static_cast<float>(M_PI), 2) +
-        std::pow(update(1) * 180.0F / static_cast<float>(M_PI), 2) +
-        std::pow(update(2) * 180.0F / static_cast<float>(M_PI), 2));
+        std::pow(update(0) * 180.0F / static_cast<float>(std::numbers::pi), 2) +
+        std::pow(update(1) * 180.0F / static_cast<float>(std::numbers::pi), 2) +
+        std::pow(update(2) * 180.0F / static_cast<float>(std::numbers::pi), 2));
     const float delta_translation = std::sqrt(
         std::pow(update(3) * 100.0F, 2) + std::pow(update(4) * 100.0F, 2) +
         std::pow(update(5) * 100.0F, 2));

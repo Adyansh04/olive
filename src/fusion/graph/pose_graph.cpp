@@ -6,6 +6,8 @@
 #include <gtsam/slam/PriorFactor.h>
 #include <gtsam_unstable/slam/PartialPriorFactor.h>
 
+#include <numbers>
+
 #include "olive/fusion/graph/marker_anchor_factor.hpp"
 #include "olive/fusion/graph/marker_observation_factor.hpp"
 
@@ -48,7 +50,7 @@ void PoseGraph::addFirstKeyframe(const gtsam::Pose3& pose)
     // [rot, trans] variances: firm roll/pitch, free yaw, very loose position
     // so a global anchor can later pull the whole trajectory.
     gtsam::Vector6 variances;
-    variances << 1e-2, 1e-2, M_PI * M_PI, 1e8, 1e8, 1e8;
+    variances << 1e-2, 1e-2, std::numbers::pi * std::numbers::pi, 1e8, 1e8, 1e8;
     const auto prior_noise = gtsam::noiseModel::Diagonal::Variances(variances);
 
     pending_factors_.add(gtsam::PriorFactor<gtsam::Pose3>(X(0), pose, prior_noise));

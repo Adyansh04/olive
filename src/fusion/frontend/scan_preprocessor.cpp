@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <numbers>
 #include <optional>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 
@@ -134,10 +135,10 @@ public:
 private:
     std::optional<ScalarReader> reader_;
     std::string                 name_;
-    double       header_stamp_   = 0.0;
-    bool         found_          = false;
-    bool         is_nanoseconds_ = false;
-    bool         is_absolute_    = false;
+    double                      header_stamp_   = 0.0;
+    bool                        found_          = false;
+    bool                        is_nanoseconds_ = false;
+    bool                        is_absolute_    = false;
 };
 
 }  // namespace
@@ -262,7 +263,7 @@ bool ScanPreprocessor::processUnorganized(const sensor_msgs::msg::PointCloud2& m
         // Azimuth in the SENSOR frame (before the extrinsic), wrapped to [0, 2pi)
         float azimuth = std::atan2(y, x);
         if (azimuth < 0.0F)
-            azimuth += 2.0F * static_cast<float>(M_PI);
+            azimuth += 2.0F * static_cast<float>(std::numbers::pi);
 
         rings[ring].push_back(
             { azimuth, x, y, z, range, time_reader.found() ? time_reader.relTime(index) : 0.0F });
@@ -275,7 +276,7 @@ bool ScanPreprocessor::processUnorganized(const sensor_msgs::msg::PointCloud2& m
         return false;
 
     const float column_scale =
-        static_cast<float>(columns_per_ring) / (2.0F * static_cast<float>(M_PI));
+        static_cast<float>(columns_per_ring) / (2.0F * static_cast<float>(std::numbers::pi));
     const Eigen::Affine3f& tf = config_.base_from_lidar;
 
     out.ring_start.resize(rings.size());
