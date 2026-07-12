@@ -18,6 +18,12 @@
 set -o pipefail
 source /opt/ros/jazzy/setup.zsh
 source /home/adyansh/olive_ws/install/setup.zsh
+# Source-built optimized deps (BUILDING.md): prepend so they win over apt
+# copies when present; harmless no-ops otherwise.
+for d in /home/adyansh/olive_ws/deps/gtsam-install/lib \
+         /home/adyansh/olive_ws/deps/pcl-install/lib; do
+  [[ -d "$d" ]] && export LD_LIBRARY_PATH=$d:$LD_LIBRARY_PATH
+done
 
 LABEL=${1:-run}
 DO_PERF=0

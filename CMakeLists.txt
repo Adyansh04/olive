@@ -23,11 +23,14 @@ if(olive_ipo_supported)
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 endif()
 
-# NOTE: -march (AVX2/FMA) is deliberately NOT offered: TUs compiled at
-# x86-64-v3 corrupt the heap at the prebuilt (SSE2-ABI) GTSAM boundary —
-# every gtsam-linked unit test dies with "double free or corruption", and
-# pinning EIGEN_MAX_ALIGN_BYTES does not fix it. Enabling AVX here would
-# require rebuilding GTSAM (and ideally PCL) from source with matching flags.
+# Opt-in AVX2/FMA codegen. REQUIRES GTSAM (and ideally PCL) built from source
+# with the same -march — against the prebuilt SSE2-ABI apt GTSAM this corrupts
+# the heap (every gtsam-linked unit test dies). See BUILDING.md for the
+# source-built dependency setup; results are ATE-validated, not bit-identical.
+option(OLIVE_NATIVE_OPT "Enable -march=x86-64-v3 (needs source-built deps, see BUILDING.md)" OFF)
+if(OLIVE_NATIVE_OPT)
+  add_compile_options(-march=x86-64-v3)
+endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra)
@@ -47,7 +50,6 @@ find_package(tf2_eigen REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
-find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(image_transport REQUIRED)
@@ -80,7 +82,6 @@ set(COMMON_DEPENDENCIES
   tf2_geometry_msgs
   visualization_msgs
   diagnostic_msgs
-  pcl_ros
   pcl_conversions
   cv_bridge
   image_transport
