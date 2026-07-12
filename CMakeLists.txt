@@ -13,6 +13,16 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
+# -O3 for the default profile (measured on the maze_1loop replay benchmark)
+# and LTO so inlining still works across the fusion_node TU split.
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g -DNDEBUG")
+cmake_policy(SET CMP0069 NEW)  # honor INTERPROCEDURAL_OPTIMIZATION (LTO)
+include(CheckIPOSupported)
+check_ipo_supported(RESULT olive_ipo_supported)
+if(olive_ipo_supported)
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+endif()
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra)
 endif()
